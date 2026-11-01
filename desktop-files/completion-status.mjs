@@ -19,9 +19,11 @@ export function completionFromRecords(records, tool, conversationId, nativeId = 
   for (let index = records.length - 1; index >= 0; index--) {
     const row = records[index];
     if (tool === 'claude') {
-      if (row.isSidechain || row.isMeta || row.isCompactSummary) continue;
+      if (row.isSidechain || row.isCompactSummary) continue;
+      if (row.isApiErrorMessage || row.type === 'system' && row.subtype === 'api_error') return null;
+      if (row.isMeta) continue;
       if (row.type === 'user') return null;
-      if (row.type === 'system' && ['compact_boundary', 'api_error'].includes(row.subtype)) return null;
+      if (row.type === 'system' && row.subtype === 'compact_boundary') return null;
       if (row.type !== 'assistant') continue;
       if (nativeId && row.sessionId && row.sessionId !== nativeId) return null;
       const message = row.message || {};

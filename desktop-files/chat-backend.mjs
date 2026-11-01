@@ -481,8 +481,15 @@ export async function handleChat(req, res, url, api) {
       const conversationId = hash(JSON.stringify([row.tool, row.claude_session_id, row.codex_session_id, row.transcript_path]));
       const captured = prompts.get(row.id);
       const activity = chatActivity(row, prompt);
+      // A native API error is a request outcome, not a successful assistant reply.
+      // Keep background tasks and the existing session process intact.
+      const requestIssue = !before ? data.requestIssue : null;
+      if (requestIssue && !prompt && !['stopped', 'error', 'starting'].includes(row.status)) {
+        activity.activity = requestIssue.state === 'retrying' ? 'retrying' : 'request_failed';
+        activity.turnRunning = requestIssue.state === 'retrying';
+      }
       const foregroundIdle = ['waiting', 'idle'].includes(activity.activity);
-      const canSuggest = foregroundIdle && !before && !prompt && captured?.identity === hash(JSON.stringify(deliveryIdentity(row))) && captured.turnId === turnId && Date.now() - captured.time < 3000;
+      const canSuggest = foregroundIdle && !requestIssue && !before && !prompt && captured?.identity === hash(JSON.stringify(deliveryIdentity(row))) && captured.turnId === turnId && Date.now() - captured.time < 3000;
       const suggestionRow = foregroundIdle ? { ...row, status: 'waiting' } : row;
       const suggestion = canSuggest ? nativeSuggestion(suggestionRow, captured.content, conversationId, turnId) ||
         await codexContextSuggestion(suggestionRow, captured.content, conversationId, data.messages).catch(() => null) : null;

@@ -63,7 +63,7 @@ $files += @(
     'install-claude-statusline.py', 'install-web.py', 'install.py', 'message-paths.mjs',
     'model-controls.mjs', 'native-controls.mjs', 'native-suggestions.mjs',
     'Open-AgentDeck-Chinese.ps1', 'output-files.mjs', 'project-backend.mjs',
-    'prompt-adapter.mjs', 'terminal-backend.mjs', 'web-server.mjs', 'windows-files.ps1'
+    'prompt-adapter.mjs', 'terminal-backend.mjs', 'web-server.mjs', 'windows-files.ps1', 'windows-proxy-stdio.py'
 ) | ForEach-Object { 'desktop-files/' + $_ }
 $files += @(
     'desktop-contextmenus.js', 'desktop-ui.css', 'desktop-ui.js', 'favicon.ico',

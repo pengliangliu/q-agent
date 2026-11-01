@@ -327,6 +327,10 @@ function SessionChat({ sessionId }) {
   const startFailed = status === 'error' && Boolean(store.history.startupError)
   const startupError = store.history.startupError
   const running = store.history.turnRunning ?? status === 'running'
+  const requestIssue = ['retrying', 'failed'].includes(store.history.requestIssue?.state) ? store.history.requestIssue : null
+  const issueStatusText = requestIssue?.state === 'retrying' ? requestIssue.kind === 'network' ? '连接重试中' : '请求重试中' : '回复中断'
+  const issueDescription = { network: '连接模型服务失败，请检查网络连接。', authentication: '登录或鉴权未通过，请在独立终端检查账号状态。',
+    rate_limit: '请求受到额度或频率限制，请等待后查看状态。', server: '模型服务暂时不可用，请稍后查看状态。' }[requestIssue?.kind] || '请求遇到异常，请查看当前会话状态。'
   const prompt = store.history.prompt
   const requiresAction = !!prompt || /approval|permission|user-input|blocked/.test(substate)
   const readOnly = readOnlySignal.value || store.history.readOnly === true
@@ -339,8 +343,11 @@ function SessionChat({ sessionId }) {
   const commandMenuOpen = slashOpen && /^\s*\/[^\s/]*$/.test(store.draft)
   const canSend = !!(store.draft.trim() || store.files.some(file => file.path)) && !uploading && !invalidFile && !readOnly && !stopped && !starting && !requiresAction && !store.pending && !store.sending && !commandPending && !modelBusy && supported && store.loaded && store.history.canSend !== false
   const canSubmitDraft = canSend && (!isSlashCommand || (!running && store.files.length === 0))
+  const canFillContinue = requestIssue?.state === 'failed' && store.draft === '' && store.files.length === 0 &&
+    !store.pending && !store.sending && !store.promptResponse && !store.responding && !commandPending && !commandPosting.current &&
+    !readOnly && !stopped && !starting && !requiresAction && !modelBusy && !historyError && supported && store.loaded
   const nativeSuggestion = store.history.suggestion
-  const suggestion = suggestionSynced && !historyError && nativeSuggestion?.text && nativeSuggestion.revision &&
+  const suggestion = suggestionSynced && !historyError && !requestIssue && nativeSuggestion?.text && nativeSuggestion.revision &&
     nativeSuggestion.conversationId === store.history.conversationId && nativeSuggestion.revision !== store.dismissedSuggestion &&
     store.draft === '' && store.files.length === 0 && !readOnly && !stopped && !running && !starting && !requiresAction &&
     !store.pending && !store.sending && !commandPending && !modelBusy && !commandMenuOpen && !advancedOpen &&
@@ -360,6 +367,17 @@ function SessionChat({ sessionId }) {
     if (!suggestion || !alive.current || selectedIdSignal.value !== sessionId || store.draft || store.files.length || readOnlySignal.value ||
       store.history.suggestion?.revision !== suggestion.revision) return
     update({ draft: suggestion.text })
+    setSlashOpen(false)
+    inputRef.current?.focus()
+  }
+
+  function fillContinue() {
+    if (!canFillContinue || !alive.current || selectedIdSignal.value !== sessionId || readOnlySignal.value ||
+      store.history.requestIssue?.id !== requestIssue?.id || store.history.requestIssue?.state !== 'failed' ||
+      store.draft !== '' || store.files.length || store.pending || store.sending || store.history.prompt ||
+      store.promptResponse || store.responding || commandPosting.current) return
+    dismissSuggestion()
+    update({ draft: '继续' })
     setSlashOpen(false)
     inputRef.current?.focus()
   }
@@ -441,7 +459,7 @@ function SessionChat({ sessionId }) {
         const fresh = history.messages || []
         const known = new Map((conversationChanged ? [] : store.messages).map(message => [message.id, message]))
         const contentChanged = conversationChanged || fresh.some(message => JSON.stringify(known.get(message.id)) !== JSON.stringify(message)) ||
-          history.prompt?.id !== store.history.prompt?.id
+          history.prompt?.id !== store.history.prompt?.id || JSON.stringify(history.requestIssue || null) !== JSON.stringify(store.history.requestIssue || null)
         if (contentChanged) beforeMessages()
         for (const message of fresh) known.set(message.id, message)
         const messages = [...known.values()]
@@ -868,7 +886,7 @@ function SessionChat({ sessionId }) {
 
   const statusText = starting ? '正在启动' : startFailed ? '会话启动失败' : stopped ? '未运行' : modelBusy ? '正在切换模型' :
     commandPending ? store.pendingCommand.prompt ? '等待命令选择' : store.pendingCommand.state === 'unknown' ? '命令结果待确认' : '命令处理中' :
-    requiresAction ? '等待你的确认' : running ? '正在处理' : store.history.backgroundWork ? '后台任务运行中' : store.loaded ? '可以发送消息' : '正在连接'
+    requiresAction ? '等待你的确认' : requestIssue ? issueStatusText : running ? '正在处理' : store.history.backgroundWork ? '后台任务运行中' : store.loaded ? '可以发送消息' : '正在连接'
   const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files')
   return html`<section class="chat-panel" data-desktop-session-id=${sessionId} aria-label="会话聊天"
     onDragEnter=${event => { if (hasFiles(event)) { event.preventDefault(); dragDepth.current++; setDragging(true) } }}
@@ -884,7 +902,7 @@ function SessionChat({ sessionId }) {
       ${session?.group && html`<button type="button" title=${session.group} onClick=${() => selectGroup(session.group)}>▱ ${session.group}</button><span aria-hidden="true">›</span>`}
       ${ancestors.map(parent => html`<button type="button" title=${parent.title} onClick=${() => selectSession(parent.id)}>${parent.title}</button><span aria-hidden="true">›</span>`)}
       <span aria-current="page">${session?.title || '当前会话'}</span></nav>
-      <div class="chat-title-line"><strong translate="no">${session?.title || '当前会话'}</strong><span class=${'chat-state ' + (running ? 'active' : '')}><i />${statusText}</span></div></div>
+      <div class="chat-title-line"><strong translate="no">${session?.title || '当前会话'}</strong><span class=${'chat-state ' + (requestIssue ? 'issue-' + requestIssue.state : running ? 'active' : '')}><i />${statusText}</span></div></div>
       <div class="chat-header-actions"><${ChatQuota} key=${'quota:' + sessionId} sessionId=${sessionId} tool=${session?.tool} />
         <${SessionModelControls} key=${sessionId + ':' + session?.tool} sessionId=${sessionId} tool=${session?.tool}
         disabled=${readOnly || stopped || running || starting || requiresAction || Boolean(store.pending) || Boolean(commandPending)}
@@ -942,7 +960,17 @@ function SessionChat({ sessionId }) {
       ${(requiresAction || store.promptResponse) && !store.pendingCommand?.prompt && html`<${InlinePrompt} key=${prompt?.id || 'unrecognized'} prompt=${prompt} response=${store.promptResponse}
         disabled=${readOnly || Boolean(historyError) || store.responding} onRespond=${respond} onRefresh=${() => refreshRef.current?.(true)} onAdvanced=${openAdvanced} advancedLoading=${advancedLoading}
         onStopTracking=${() => { if (store.promptResponse?.canStopTracking && !store.responding) update({ promptResponse: { ...store.promptResponse, trackingStopped: true } }) }} />`}
-      ${running && html`<div class="chat-working" role="status"><span class="chat-working-dot" />${requiresAction ? '正在等待你的操作' : '正在处理…'}</div>`}
+      ${requestIssue && html`<section class=${'chat-pending chat-request-issue ' + requestIssue.state} role=${requestIssue.state === 'failed' ? 'alert' : 'status'} aria-label="请求状态">
+        <strong>${issueStatusText}</strong>${requestIssue.timestamp && html`<${MessageTime} timestamp=${requestIssue.timestamp} />`}
+        <p>${issueDescription}</p><small>${requestIssue.state === 'retrying' ? '原生会话正在自动重试。' : '本轮回复已中断，已有内容已保留。'}</small>
+        ${requestIssue.state === 'retrying' && Number.isInteger(requestIssue.retryAttempt) && requestIssue.retryAttempt >= 0 && html`<small>重试次数：${requestIssue.retryAttempt}${Number.isInteger(requestIssue.maxRetries) && requestIssue.maxRetries > 0 ? ' / ' + requestIssue.maxRetries : ''}</small>`}
+        ${requestIssue.state === 'retrying' && Number.isFinite(requestIssue.retryInMs) && requestIssue.retryInMs >= 0 && html`<small>原生重试间隔：约 ${Math.ceil(requestIssue.retryInMs / 1000)} 秒</small>`}
+        <div class="chat-request-issue-actions"><button type="button" onClick=${() => refreshRef.current?.()}>刷新状态</button>
+          <button type="button" disabled=${openingTerminal} onClick=${openTerminal}>${openingTerminal ? '正在打开…' : '独立终端'}</button>
+          ${canFillContinue && html`<button type="button" onClick=${fillContinue}>填写继续</button>`}</div>
+        ${canFillContinue && html`<small>仅填写输入框，按 Enter 后发送。</small>`}
+      </section>`}
+      ${running && html`<div class=${'chat-working ' + (requestIssue?.state === 'failed' ? 'interrupted' : '')} role="status"><span class="chat-working-dot" />${requiresAction ? '正在等待你的操作' : requestIssue ? requestIssue.state === 'retrying' ? '正在等待原生请求重试…' : '回复已中断，请查看上方提示。' : '正在处理…'}</div>`}
       ${store.history.notice && html`<p class="chat-history-notice">${store.history.notice}</p>`}
     </div></div>
     ${showLatest && html`<button type="button" class="chat-latest" onClick=${scrollToLatest}>↓ 最新消息</button>`}
@@ -985,7 +1013,7 @@ function SessionChat({ sessionId }) {
           }} />
         <div class="chat-composer-actions"><button type="button" class="chat-attach" disabled=${readOnly || store.sending} title="添加图片或文件" aria-label="添加图片或文件" onClick=${() => fileRef.current?.click()}>＋</button>
           <input ref=${fileRef} type="file" multiple hidden onChange=${event => { addFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
-          <span class="chat-input-hint">${suggestion ? html`<span id="chat-native-suggestion-hint" class="chat-suggestion-hint">${suggestion.source === 'local-context' && html`<span>基于本轮回复</span>`}<button type="button" onClick=${acceptSuggestion} aria-label="接受下一步建议"><kbd>Tab</kbd> 接受建议</button><span>Esc 忽略 · Enter 发送</span></span>` : uploading ? '文件上传中…' : isSlashCommand ? store.files.length ? '命令不支持附件，请移除附件后执行' : 'Enter 执行命令 · / 查看可用命令' : running ? '正在处理，新消息将加入队列 · Enter 提交' : 'Enter 发送 · Shift + Enter 换行 · / 命令'}</span>
+          <span class="chat-input-hint">${suggestion ? html`<span id="chat-native-suggestion-hint" class="chat-suggestion-hint">${suggestion.source === 'local-context' && html`<span>基于本轮回复</span>`}<button type="button" onClick=${acceptSuggestion} aria-label="接受下一步建议"><kbd>Tab</kbd> 接受建议</button><span>Esc 忽略 · Enter 发送</span></span>` : uploading ? '文件上传中…' : isSlashCommand ? store.files.length ? '命令不支持附件，请移除附件后执行' : 'Enter 执行命令 · / 查看可用命令' : requestIssue ? requestIssue.state === 'retrying' ? '请求正在重试，新消息将加入队列 · Enter 提交' : '回复已中断 · Enter 提交 · / 命令' : running ? '正在处理，新消息将加入队列 · Enter 提交' : 'Enter 发送 · Shift + Enter 换行 · / 命令'}</span>
           ${running && html`<button type="button" class="chat-stop" disabled=${stopping || readOnly || store.history.canInterrupt === false} onClick=${interrupt}><span aria-hidden="true">■</span> ${stopping ? '正在停止…' : '停止生成'}</button>`}
           <button type="submit" class="chat-send" disabled=${!canSubmitDraft} aria-label=${isSlashCommand ? '执行命令' : running ? '加入队列' : '发送消息'} title=${isSlashCommand ? '执行命令' : running ? '加入队列' : '发送消息'}>↑</button>
         </div></form><p class="chat-composer-footnote">支持拖入多个文件、粘贴截图 · 单个文件不超过 100 MB</p>

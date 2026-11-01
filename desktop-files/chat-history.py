@@ -3,6 +3,7 @@
 import base64
 import ctypes
 import ctypes.util
+from datetime import datetime
 import hashlib
 import html
 import json
@@ -111,7 +112,7 @@ def messages(record):
     elif kind in ("user", "assistant") and not record.get("isSidechain"):
         message = record.get("message", {})
         role = message.get("role", kind)
-        if role not in ("user", "assistant") or record.get("isMeta") or record.get("isCompactSummary"):
+        if role not in ("user", "assistant") or record.get("isMeta") or record.get("isCompactSummary") or record.get("isApiErrorMessage"):
             return []
         blocks = message.get("content", [])
         if isinstance(blocks, str):
@@ -148,6 +149,72 @@ def messages(record):
             item["directoryHints"] = hints
     # event_msg duplicates response_item; reasoning, system, snapshots and API blobs are never rendered.
     return result
+
+
+def claude_request_signal(record, normalized):
+    """Resolve the newest foreground request event without exposing native error data."""
+    if record.get("isSidechain"):
+        return False, None
+    kind, subtype = record.get("type"), record.get("subtype")
+    if record.get("isCompactSummary") or (kind == "system" and subtype == "compact_boundary"):
+        return True, None
+    retry = kind == "system" and subtype == "api_error"
+    failed = kind == "assistant" and bool(record.get("isApiErrorMessage"))
+    if not retry and not failed:
+        if record.get("isMeta"):
+            return False, None
+        real_user = kind == "user" and any(item["role"] == "user" for item in normalized)
+        message = record.get("message", {})
+        assistant = kind == "assistant" and (bool(normalized) or isinstance(message, dict) and
+                    message.get("stop_reason") in ("end_turn", "stop_sequence"))
+        return bool(real_user or assistant), None
+
+    def number(value, minimum, maximum):
+        return int(value) if (isinstance(value, (int, float)) and not isinstance(value, bool) and
+                              minimum <= value <= maximum and int(value) == value) else None
+
+    error = record.get("error")
+    details = error if isinstance(error, dict) else {}
+    nested = details.get("error") if isinstance(details.get("error"), dict) else {}
+    status = next((value for value in (number(record.get("statusCode"), 100, 599),
+                  number(details.get("status"), 100, 599), number(details.get("statusCode"), 100, 599),
+                  number(nested.get("status"), 100, 599)) if value is not None), None)
+    texts = [error] if isinstance(error, str) else []
+    for source in (details, nested):
+        texts.extend(source.get(key) for key in ("message", "type", "name", "code") if isinstance(source.get(key), str))
+    if failed:
+        content = record.get("message", {}).get("content", [])
+        if isinstance(content, str):
+            texts.append(content)
+        elif isinstance(content, list):
+            texts.extend(block["text"] for block in content[:8] if isinstance(block, dict) and
+                         block.get("type") == "text" and isinstance(block.get("text"), str))
+    text = " ".join(value[:2048] for value in texts)
+    if status is None:
+        match = re.search(r"\b(?:API Error|HTTP|status)[: ]+(\d{3})\b", text, re.I)
+        status = number(int(match[1]), 100, 599) if match else None
+    if status in (401, 403) or re.search(r"authentication|unauthorized|invalid.api.key|login.required", text, re.I):
+        issue_kind = "authentication"
+    elif status == 429 or re.search(r"rate.limit|too.many.requests", text, re.I):
+        issue_kind = "rate_limit"
+    elif status is not None and status >= 500:
+        issue_kind = "server"
+    elif re.search(r"connection|network|ECONN\w*|ENOTFOUND|EAI_AGAIN|fetch failed|timed?\s*out|ETIMEDOUT|offline", text, re.I):
+        issue_kind = "network"
+    else:
+        issue_kind = "unknown"
+    timestamp = record.get("timestamp")
+    try:
+        if not isinstance(timestamp, str) or len(timestamp) > 64 or "T" not in timestamp:
+            raise ValueError()
+        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        timestamp = None
+    return True, {"source": "transcript", "state": "retrying" if retry else "failed", "kind": issue_kind,
+                  "timestamp": timestamp, "statusCode": status,
+                  "retryAttempt": number(record.get("retryAttempt"), 0, 1000000),
+                  "maxRetries": number(record.get("maxRetries"), 0, 1000000),
+                  "retryInMs": number(record.get("retryInMs"), 0, 86400000)}
 
 
 def native_session(record):
@@ -265,7 +332,8 @@ def resolve_source(request):
 def page(request):
     source = resolve_source(request)
     if source is None:
-        return {"messages": [], "hasMore": False, "notice": "此会话尚无可读取的原生聊天记录。"}
+        return {"messages": [], "hasMore": False, "notice": "此会话尚无可读取的原生聊天记录。",
+                **({"requestIssue": None} if request.get("tool") == "claude" and not request.get("before") else {})}
     if not source.is_absolute() or not (source.name.endswith(".jsonl") or source.name.endswith(".jsonl.zst")):
         raise ValueError("不支持此记录格式。")
     original = source.resolve()
@@ -284,6 +352,7 @@ def page(request):
     found, notice = [], ""
     context_pending = []
     claude_context = request.get("tool") == "claude"
+    request_issue, request_checked = None, not claude_context or bool(request.get("before"))
     with source.open("rb") as handle:
         # Include the boundary row so multiple blocks in the same native record paginate without loss.
         end = boundary
@@ -322,6 +391,10 @@ def page(request):
                     context_pending.clear()
                     continue  # A writer may not have finished its final JSONL row yet.
                 if claude_context:
+                    if not request_checked:
+                        request_checked, request_issue = claude_request_signal(record, normalized)
+                        if request_issue:
+                            request_issue["id"] = f"{tag}:{offset}:request-issue"
                     # Tool results and native task notices have role=tool;
                     # only a real user input closes the preceding turn.
                     if (record.get("type") == "user" and any(item["role"] == "user" for item in normalized)) or record.get("isCompactSummary") or (record.get("type") == "system" and record.get("subtype") == "compact_boundary"):
@@ -370,6 +443,8 @@ def page(request):
                 item["toolName"] = names[item["callId"]]
             item.pop("callId", None)
         result = {"messages": selected, "hasMore": has_more}
+        if claude_context and not request.get("before"):
+            result["requestIssue"] = request_issue
         if has_more:
             result["before"] = base64.urlsafe_b64encode(json.dumps(cursor).encode()).decode().rstrip("=")
         if notice:
