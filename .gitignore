@@ -42,5 +42,6 @@
 **/installation.json
 native-idle-send/build/
 audit/
+release/
 .DS_Store
 Thumbs.db

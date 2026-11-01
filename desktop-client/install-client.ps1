@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([switch]$SkipShortcuts)
+
+$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $source = Join-Path $PSScriptRoot 'dist'
@@ -31,23 +33,25 @@ $launcher = Join-Path $installedRoot 'Open-AgentDeck-Chinese.ps1'
 if (Test-Path -LiteralPath $launcher) { Copy-Item -LiteralPath $launcher -Destination (Join-Path $backup 'Open-AgentDeck-Chinese.ps1') }
 Copy-Item -LiteralPath $workspaceLauncher -Destination $launcher -Force
 
-$shell = New-Object -ComObject WScript.Shell
-$locations = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))
 $registered = @()
-foreach ($folder in $locations) {
-    if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
-    $link = Join-Path $folder 'Q-agent.lnk'
-    if (Test-Path -LiteralPath $link) { Copy-Item -LiteralPath $link -Destination (Join-Path $backup ('shortcut-' + $registered.Count + '.lnk')) }
-    $shortcut = $shell.CreateShortcut($link)
-    $shortcut.TargetPath = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $launcher + '"'
-    $shortcut.WorkingDirectory = $installedRoot
-    $shortcut.Description = 'Q-agent desktop client for local WSL sessions'
-    $shortcut.IconLocation = (Join-Path $clientRoot 'QAgent.exe') + ',0'
-    $shortcut.Save()
-    $registration = Start-Process -FilePath (Join-Path $clientRoot 'QAgent.exe') -ArgumentList @('--register-shortcut', ('"' + $link + '"')) -WindowStyle Hidden -Wait -PassThru
-    if ($registration.ExitCode -ne 0) { throw 'Could not register the Q-agent notification shortcut.' }
-    $registered += $link
+if (-not $SkipShortcuts) {
+    $shell = New-Object -ComObject WScript.Shell
+    $locations = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))
+    foreach ($folder in $locations) {
+        if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
+        $link = Join-Path $folder 'Q-agent.lnk'
+        if (Test-Path -LiteralPath $link) { Copy-Item -LiteralPath $link -Destination (Join-Path $backup ('shortcut-' + $registered.Count + '.lnk')) }
+        $shortcut = $shell.CreateShortcut($link)
+        $shortcut.TargetPath = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $launcher + '"'
+        $shortcut.WorkingDirectory = $installedRoot
+        $shortcut.Description = 'Q-agent desktop client for local WSL sessions'
+        $shortcut.IconLocation = (Join-Path $clientRoot 'QAgent.exe') + ',0'
+        $shortcut.Save()
+        $registration = Start-Process -FilePath (Join-Path $clientRoot 'QAgent.exe') -ArgumentList @('--register-shortcut', ('"' + $link + '"')) -WindowStyle Hidden -Wait -PassThru
+        if ($registration.ExitCode -ne 0) { throw 'Could not register the Q-agent notification shortcut.' }
+        $registered += $link
+    }
 }
 foreach ($name in $required) {
     if ((Get-FileHash -LiteralPath (Join-Path $source $name) -Algorithm SHA256).Hash -ne

@@ -19,21 +19,42 @@
 - 本机可用证据支持的额度显示、完成提醒、诊断与已部署界面更新检查。
 - 隐藏时暂停聊天轮询，空闲时降低刷新频率；可选的安全空闲投递优化。
 
+## 下载安装包
+
+从 [GitHub Releases](https://github.com/pengliangliu/q-agent/releases/latest) 下载 **Q-agent-Setup-0.1.0-windows-x64.exe**。安装包使用企鹅图标，按当前 Windows 用户安装，附带编译好的客户端，无需安装开发工具。首次运行会打开中文环境配置向导：
+
+1. **检测已有环境**：选择 WSL2 发行版和普通 Linux 用户。环境就绪时，可直接连接客户端。
+2. **没有 WSL**：点击“启用 / 安装 WSL”，按 Windows 提示授权；如需重启，保存工作并自行重启，再从开始菜单打开“Q-agent 环境设置”。点击“安装 Ubuntu 24.04”添加官方发行版。
+3. **初始化 Linux 用户**：打开 Linux 完成首次初始化。如果直接进入 root，点击“创建 Linux 用户”，在终端设置用户名和密码，再把用户名填回向导。密码不经过配置向导。
+4. **安装 WSL 依赖**：自动安装系统包、Agent Deck 和 Node.js；可选安装 Claude Code、Codex CLI。下载采用固定版本和完整性校验，已有兼容安装会复用。版本冲突会停止该步骤并保留已有程序。
+5. **检测 systemd**：未启用时点击“启用 systemd”。保存该发行版内的工作后，明确选择“重启所选 WSL”，再检测用户服务。向导不会自动关闭其他发行版。
+6. **连接客户端**：如缺少 WebView2，先使用对应按钮安装 Microsoft 官方运行库。点击“连接 / 更新客户端”，再通过登录按钮使用自己的助手账号登录，启动 Q-agent。
+
+依赖下载需要网络。WSL 自动安装需要 Windows 管理员授权，并可能要求重启；虚拟化支持需在电脑固件中开启。Linux 自动配置支持 Ubuntu / Debian 的 apt 环境，其他发行版可手动准备下面列出的依赖后检测。WSL1 不会被自动转换，已有发行版、默认发行版和模型会话不会被删除。
+
+安装器和 Q-agent 主程序目前**没有代码签名**，Windows 可能显示未知发布者。可使用同一 Release 的 `SHA256SUMS` 核对下载文件：
+
+```powershell
+Get-FileHash .\Q-agent-Setup-0.1.0-windows-x64.exe -Algorithm SHA256
+```
+
+卸载会移除 Windows 程序文件和快捷方式，保留 WSL、Linux 工具、用户项目与会话、本机连接设置和备份。重新安装可复用这些环境。开始菜单的环境设置入口也可用于依赖检测和修复；本机设置日志位于 `%LOCALAPPDATA%\QAgent\setup`，反馈问题前请检查个人路径等内容。
+
 ## 运行要求
 
 本扩展针对 **Agent Deck v1.16.35**。本次适配过 Claude Code **2.1.316** 和 Codex CLI **0.163.0**；原生菜单或协议升级后可能需要重新适配。
 
 - Windows 10/11 x64，.NET Framework 4.8，以及 [WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)。
 - WSL2 Linux，启用 systemd 的用户服务和 Windows 互操作；使用普通 Linux 用户安装。
-- WSL 中已有 Agent Deck v1.16.35、Node.js 22+、Python 3 和 tmux。
-- Claude Code / Codex CLI 按各自官方方式安装、登录，并能在 Agent Deck 中使用。
-- Windows Terminal 用于“独立终端”。编译器来自 Windows 的 .NET Framework 安装。
+- WSL 中运行 Agent Deck v1.16.35、Node.js 22+、Python 3 和 tmux，安装向导可补齐。
+- Claude Code / Codex CLI 使用者自行登录，并能在 Agent Deck 中使用。
+- Windows Terminal 用于“独立终端”。源码构建使用 Windows 的 .NET Framework 编译器；安装包无需编译。
 
-请先按 [Agent Deck 官方说明](https://github.com/asheshgoplani/agent-deck/tree/v1.16.35) 安装上游程序。这个仓库不携带助手账号、API key、登录状态、会话数据或已安装的助手程序。
+依赖版本及官方校验来源见 [bootstrap-sources.md](installer/bootstrap-sources.md)。这个仓库与安装包不携带助手账号、API key、登录状态或会话数据。
 
-## 安装
+## 从源码安装
 
-克隆或下载本仓库，在 Windows PowerShell 中进入仓库目录后执行：
+手动准备上述 WSL 依赖（[Agent Deck 官方说明](https://github.com/asheshgoplani/agent-deck/tree/v1.16.35)），克隆或下载本仓库，在 Windows PowerShell 中进入仓库目录后执行：
 
 ```powershell
 # 使用默认 WSL 发行版和默认 Linux 用户
@@ -68,6 +89,7 @@ python3 "$HOME/.local/share/agent-deck/desktop-files/install-claude-statusline.p
 | `desktop-client/` | WinForms / WebView2 客户端及源码构建脚本 |
 | `desktop-files/` | 本地 HTTP 桥接、聊天适配、文件桥接和网页覆盖模块 |
 | `native-idle-send/` | 可选的受保护空闲投递补丁及合成测试 |
+| `installer/` | Windows 安装器、中文配置向导与 WSL 初始化脚本 |
 | `tools/` | 针对发布源码的检查工具 |
 
 这是独立整理的发布快照。开发时的真实会话、附件、截图、运行日志、安装报告、账户配置和密钥没有进入仓库。公开版沿用企鹅图标，图标素材说明见第三方声明。
@@ -76,7 +98,9 @@ python3 "$HOME/.local/share/agent-deck/desktop-files/install-claude-statusline.p
 
 软件在本机运行时会读取你自己已有的 Agent Deck 会话和助手原生状态，必要的额度查询使用本机现有授权。请不要把这些运行目录或认证文件提交进仓库。诊断按钮只复制经过筛选的版本、连接及数量信息；分享其他日志前请检查内容。
 
-本仓库首次发布检查包括源码语法、Windows 客户端构建、可移植补丁应用，以及针对已选源码和 Git 历史的隐私/密钥扫描。首次安装脚本未在新的 Windows/WSL 虚拟机完整执行；已有开发环境的功能验证不等于所有配置均已覆盖。
+发布检查包括源码语法、Windows 客户端构建、WSL 只读预检、初始化脚本的隔离检查，以及源码、Git 历史和安装包实际文件的隐私/密钥扫描。首次安装流程尚未在全新的 Windows/WSL 虚拟机中完整执行；Windows 组件启用、重启和新发行版初始化仍需在目标电脑验证。
+
+构建安装包需要 [Inno Setup 7](https://jrsoftware.org/isdl.php)，运行 `installer/Build-Release.ps1`。脚本按有限文件清单生成 `release/` 下的安装器、SHA256SUMS 和逐文件校验清单，不收集已安装环境的数据。
 
 ## 许可
 
