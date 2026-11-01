@@ -332,6 +332,8 @@ function SessionChat({ sessionId }) {
   const issueDescription = { network: '连接模型服务失败，请检查网络连接。', authentication: '登录或鉴权未通过，请在独立终端检查账号状态。',
     rate_limit: '请求受到额度或频率限制，请等待后查看状态。', server: '模型服务暂时不可用，请稍后查看状态。' }[requestIssue?.kind] || '请求遇到异常，请查看当前会话状态。'
   const prompt = store.history.prompt
+  const verifiedPrompt = prompt?.supported === true && Boolean(prompt.id)
+  const commandPromptSuperseded = verifiedPrompt && Boolean(store.pendingCommand?.prompt)
   const requiresAction = !!prompt || /approval|permission|user-input|blocked/.test(substate)
   const readOnly = readOnlySignal.value || store.history.readOnly === true
   const supported = !session?.tool || ['codex', 'claude'].includes(session.tool)
@@ -767,7 +769,8 @@ function SessionChat({ sessionId }) {
   }
 
   async function respond(answer) {
-    if (!prompt?.id || prompt.supported !== true || store.promptResponse || store.responding || readOnly || historyError || selectedIdSignal.value !== sessionId) return
+    if (!prompt?.id || prompt.supported !== true || store.history.prompt?.id !== prompt.id || store.history.prompt?.supported !== true ||
+      store.promptResponse || store.responding || commandPosting.current || readOnly || historyError || selectedIdSignal.value !== sessionId) return
     const promptId = prompt.id
     update({ responding: true, promptRevision: (store.promptRevision || 0) + 1, promptResponse: { promptId, state: 'posting' } })
     try {
@@ -858,7 +861,8 @@ function SessionChat({ sessionId }) {
 
   async function respondCommand(answer) {
     const record = store.pendingCommand
-    if (!record?.prompt?.supported || !record.prompt.id || record.response || commandPosting.current || readOnly || selectedIdSignal.value !== sessionId) return
+    if (!record?.prompt?.supported || !record.prompt.id || record.response || commandPosting.current || readOnly ||
+      (store.history.prompt?.supported === true && store.history.prompt.id) || selectedIdSignal.value !== sessionId) return
     const promptId = record.prompt.id
     commandPosting.current = true
     update({ commandRevision: (store.commandRevision || 0) + 1, pendingCommand: { ...record, response: { promptId, state: 'posting' } } })
@@ -885,7 +889,7 @@ function SessionChat({ sessionId }) {
   }
 
   const statusText = starting ? '正在启动' : startFailed ? '会话启动失败' : stopped ? '未运行' : modelBusy ? '正在切换模型' :
-    commandPending ? store.pendingCommand.prompt ? '等待命令选择' : store.pendingCommand.state === 'unknown' ? '命令结果待确认' : '命令处理中' :
+    verifiedPrompt ? '等待你的确认' : commandPending ? store.pendingCommand.prompt ? '等待命令选择' : store.pendingCommand.state === 'unknown' ? '命令结果待确认' : '命令处理中' :
     requiresAction ? '等待你的确认' : requestIssue ? issueStatusText : running ? '正在处理' : store.history.backgroundWork ? '后台任务运行中' : store.loaded ? '可以发送消息' : '正在连接'
   const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files')
   return html`<section class="chat-panel" data-desktop-session-id=${sessionId} aria-label="会话聊天"
@@ -954,11 +958,13 @@ function SessionChat({ sessionId }) {
             files: [...store.files, ...(pending.attachments || []).filter(file => !store.files.some(current => current.path === file.path))], pending: null })
           inputRef.current?.focus()
         }}>移回输入框</button>`}</div>`}
-      ${store.pendingCommand && html`<${CommandResult} record=${store.pendingCommand} time=${html`<${MessageTime} timestamp=${store.pendingCommand.submittedAt} local=${true} />`}
+      ${commandPromptSuperseded && html`<section class="chat-command-result" aria-label="原命令回执"><header><strong>原命令回执已保留</strong><code translate="no">${store.pendingCommand.command}</code></header>
+        <p>请先处理当前原生问题，之后可查询原命令状态。</p></section>`}
+      ${store.pendingCommand && !commandPromptSuperseded && html`<${CommandResult} record=${store.pendingCommand} time=${html`<${MessageTime} timestamp=${store.pendingCommand.submittedAt} local=${true} />`}
         disabled=${readOnly || Boolean(historyError) || commandPosting.current} onRefresh=${() => refreshCommand(true)} onRespond=${respondCommand}
         onTerminal=${openTerminal} openingTerminal=${openingTerminal} onDismiss=${() => update({ pendingCommand: null })} onStopTracking=${() => stopTracking('command')} />`}
-      ${(requiresAction || store.promptResponse) && !store.pendingCommand?.prompt && html`<${InlinePrompt} key=${prompt?.id || 'unrecognized'} prompt=${prompt} response=${store.promptResponse}
-        disabled=${readOnly || Boolean(historyError) || store.responding} onRespond=${respond} onRefresh=${() => refreshRef.current?.(true)} onAdvanced=${openAdvanced} advancedLoading=${advancedLoading}
+      ${(requiresAction || store.promptResponse) && (!store.pendingCommand?.prompt || verifiedPrompt) && html`<${InlinePrompt} key=${prompt?.id || 'unrecognized'} prompt=${prompt} response=${store.promptResponse}
+        disabled=${readOnly || Boolean(historyError) || store.responding || commandPosting.current} onRespond=${respond} onRefresh=${() => refreshRef.current?.(true)} onAdvanced=${openAdvanced} advancedLoading=${advancedLoading}
         onStopTracking=${() => { if (store.promptResponse?.canStopTracking && !store.responding) update({ promptResponse: { ...store.promptResponse, trackingStopped: true } }) }} />`}
       ${requestIssue && html`<section class=${'chat-pending chat-request-issue ' + requestIssue.state} role=${requestIssue.state === 'failed' ? 'alert' : 'status'} aria-label="请求状态">
         <strong>${issueStatusText}</strong>${requestIssue.timestamp && html`<${MessageTime} timestamp=${requestIssue.timestamp} />`}

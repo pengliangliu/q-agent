@@ -133,7 +133,7 @@ export function claudePrompt(content, request) {
         _native: nativeState(rows, { requestId: request.id }) };
     }
     const footer = section.findIndex((line, index) => /^\s*Enter to select ·/.test(line) &&
-      /^Enter to select · .*Esc to cancel$/.test(lineText(section.slice(index, index + 3).join(' '))));
+      [1, 2, 3].some(count => /^Enter to select · .*Esc to cancel$/.test(lineText(section.slice(index, index + count).join(' ')))));
     const divider = section.findIndex(line => /^\s*─{5,}\s*$/.test(line));
     if (footer < 0 || divider < 0) return null;
     const menu = rows.filter(row => row.index < divider);
