@@ -1,0 +1,726 @@
+{
+  "source": "https://code.claude.com/docs/en/commands",
+  "checkedAt": "2026-11-01",
+  "commands": [
+    {
+      "name": "/add-dir",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/add-dir "
+    },
+    {
+      "name": "/advisor",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/advisor "
+    },
+    {
+      "name": "/agents",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/agents "
+    },
+    {
+      "name": "/artifact-capabilities",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/artifact-capabilities "
+    },
+    {
+      "name": "/artifact-diagramming",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/artifact-diagramming "
+    },
+    {
+      "name": "/artifacts",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/artifacts "
+    },
+    {
+      "name": "/auto-mode-setup",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/auto-mode-setup "
+    },
+    {
+      "name": "/autocompact",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/autocompact "
+    },
+    {
+      "name": "/autofix-pr",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/autofix-pr "
+    },
+    {
+      "name": "/background",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/background "
+    },
+    {
+      "name": "/batch",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/batch "
+    },
+    {
+      "name": "/branch",
+      "description": "创建当前对话分支",
+      "source": "builtin",
+      "insertText": "/branch "
+    },
+    {
+      "name": "/btw",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/btw "
+    },
+    {
+      "name": "/bug",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/bug "
+    },
+    {
+      "name": "/cd",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/cd "
+    },
+    {
+      "name": "/chrome",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/chrome "
+    },
+    {
+      "name": "/claude-api",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/claude-api "
+    },
+    {
+      "name": "/claude-in-chrome",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/claude-in-chrome "
+    },
+    {
+      "name": "/clear",
+      "description": "开始新的对话上下文",
+      "source": "builtin",
+      "insertText": "/clear "
+    },
+    {
+      "name": "/code-review",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/code-review "
+    },
+    {
+      "name": "/color",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/color "
+    },
+    {
+      "name": "/compact",
+      "description": "压缩当前对话上下文",
+      "source": "builtin",
+      "insertText": "/compact "
+    },
+    {
+      "name": "/config",
+      "description": "打开设置",
+      "source": "builtin",
+      "insertText": "/config "
+    },
+    {
+      "name": "/context",
+      "description": "查看上下文用量",
+      "source": "builtin",
+      "insertText": "/context "
+    },
+    {
+      "name": "/copy",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/copy "
+    },
+    {
+      "name": "/cost",
+      "description": "查看会话用量与费用",
+      "source": "builtin",
+      "insertText": "/cost "
+    },
+    {
+      "name": "/dataviz",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/dataviz "
+    },
+    {
+      "name": "/debug",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/debug "
+    },
+    {
+      "name": "/deep-research",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/deep-research "
+    },
+    {
+      "name": "/design",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/design "
+    },
+    {
+      "name": "/design-login",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/design-login "
+    },
+    {
+      "name": "/design-sync",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/design-sync "
+    },
+    {
+      "name": "/desktop",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/desktop "
+    },
+    {
+      "name": "/diff",
+      "description": "查看代码改动",
+      "source": "builtin",
+      "insertText": "/diff "
+    },
+    {
+      "name": "/doctor",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/doctor "
+    },
+    {
+      "name": "/effort",
+      "description": "调整推理强度",
+      "source": "builtin",
+      "insertText": "/effort "
+    },
+    {
+      "name": "/exit",
+      "description": "退出当前助手",
+      "source": "builtin",
+      "insertText": "/exit "
+    },
+    {
+      "name": "/export",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/export "
+    },
+    {
+      "name": "/fast",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/fast "
+    },
+    {
+      "name": "/feedback",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/feedback "
+    },
+    {
+      "name": "/fewer-permission-prompts",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/fewer-permission-prompts "
+    },
+    {
+      "name": "/focus",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/focus "
+    },
+    {
+      "name": "/fork",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/fork "
+    },
+    {
+      "name": "/goal",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/goal "
+    },
+    {
+      "name": "/heapdump",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/heapdump "
+    },
+    {
+      "name": "/help",
+      "description": "查看帮助",
+      "source": "builtin",
+      "insertText": "/help "
+    },
+    {
+      "name": "/hooks",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/hooks "
+    },
+    {
+      "name": "/ide",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/ide "
+    },
+    {
+      "name": "/import",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/import "
+    },
+    {
+      "name": "/init",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/init "
+    },
+    {
+      "name": "/insights",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/insights "
+    },
+    {
+      "name": "/install-github-app",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/install-github-app "
+    },
+    {
+      "name": "/install-slack-app",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/install-slack-app "
+    },
+    {
+      "name": "/keybindings",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/keybindings "
+    },
+    {
+      "name": "/list-agents",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/list-agents "
+    },
+    {
+      "name": "/login",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/login "
+    },
+    {
+      "name": "/logout",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/logout "
+    },
+    {
+      "name": "/loop",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/loop "
+    },
+    {
+      "name": "/mcp",
+      "description": "管理 MCP 连接",
+      "source": "builtin",
+      "insertText": "/mcp "
+    },
+    {
+      "name": "/memory",
+      "description": "管理项目记忆",
+      "source": "builtin",
+      "insertText": "/memory "
+    },
+    {
+      "name": "/mobile",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/mobile "
+    },
+    {
+      "name": "/model",
+      "description": "选择 Claude 模型",
+      "source": "builtin",
+      "insertText": "/model "
+    },
+    {
+      "name": "/output-style",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/output-style "
+    },
+    {
+      "name": "/passes",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/passes "
+    },
+    {
+      "name": "/permissions",
+      "description": "管理操作权限",
+      "source": "builtin",
+      "insertText": "/permissions "
+    },
+    {
+      "name": "/plan",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/plan "
+    },
+    {
+      "name": "/plugin",
+      "description": "管理插件",
+      "source": "builtin",
+      "insertText": "/plugin "
+    },
+    {
+      "name": "/plugin-authoring",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/plugin-authoring "
+    },
+    {
+      "name": "/powerup",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/powerup "
+    },
+    {
+      "name": "/pr-comments",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/pr-comments "
+    },
+    {
+      "name": "/privacy-settings",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/privacy-settings "
+    },
+    {
+      "name": "/radio",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/radio "
+    },
+    {
+      "name": "/rate-limit-options",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/rate-limit-options "
+    },
+    {
+      "name": "/recap",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/recap "
+    },
+    {
+      "name": "/release-notes",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/release-notes "
+    },
+    {
+      "name": "/reload-plugins",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/reload-plugins "
+    },
+    {
+      "name": "/reload-skills",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/reload-skills "
+    },
+    {
+      "name": "/remote-control",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/remote-control "
+    },
+    {
+      "name": "/remote-env",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/remote-env "
+    },
+    {
+      "name": "/rename",
+      "description": "重命名对话",
+      "source": "builtin",
+      "insertText": "/rename "
+    },
+    {
+      "name": "/restart",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/restart "
+    },
+    {
+      "name": "/resume",
+      "description": "恢复历史对话",
+      "source": "builtin",
+      "insertText": "/resume "
+    },
+    {
+      "name": "/review",
+      "description": "审查代码",
+      "source": "builtin",
+      "insertText": "/review "
+    },
+    {
+      "name": "/rewind",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/rewind "
+    },
+    {
+      "name": "/run",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/run "
+    },
+    {
+      "name": "/run-skill-generator",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/run-skill-generator "
+    },
+    {
+      "name": "/sandbox",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/sandbox "
+    },
+    {
+      "name": "/schedule",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/schedule "
+    },
+    {
+      "name": "/scroll-speed",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/scroll-speed "
+    },
+    {
+      "name": "/security-review",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/security-review "
+    },
+    {
+      "name": "/setup-bedrock",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/setup-bedrock "
+    },
+    {
+      "name": "/setup-vertex",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/setup-vertex "
+    },
+    {
+      "name": "/simplify",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/simplify "
+    },
+    {
+      "name": "/skill-doctor",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/skill-doctor "
+    },
+    {
+      "name": "/skills",
+      "description": "查看可用技能",
+      "source": "builtin",
+      "insertText": "/skills "
+    },
+    {
+      "name": "/slides",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/slides "
+    },
+    {
+      "name": "/stats",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/stats "
+    },
+    {
+      "name": "/status",
+      "description": "查看当前会话状态",
+      "source": "builtin",
+      "insertText": "/status "
+    },
+    {
+      "name": "/statusline",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/statusline "
+    },
+    {
+      "name": "/stickers",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/stickers "
+    },
+    {
+      "name": "/stop",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/stop "
+    },
+    {
+      "name": "/subtask",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/subtask "
+    },
+    {
+      "name": "/tasks",
+      "description": "查看后台任务",
+      "source": "builtin",
+      "insertText": "/tasks "
+    },
+    {
+      "name": "/team-onboarding",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/team-onboarding "
+    },
+    {
+      "name": "/teleport",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/teleport "
+    },
+    {
+      "name": "/terminal-setup",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/terminal-setup "
+    },
+    {
+      "name": "/theme",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/theme "
+    },
+    {
+      "name": "/tui",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/tui "
+    },
+    {
+      "name": "/ultraplan",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/ultraplan "
+    },
+    {
+      "name": "/ultrareview",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/ultrareview "
+    },
+    {
+      "name": "/update-config",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/update-config "
+    },
+    {
+      "name": "/upgrade",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/upgrade "
+    },
+    {
+      "name": "/usage",
+      "description": "查看额度使用情况",
+      "source": "builtin",
+      "insertText": "/usage "
+    },
+    {
+      "name": "/usage-credits",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/usage-credits "
+    },
+    {
+      "name": "/verify",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/verify "
+    },
+    {
+      "name": "/vim",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/vim "
+    },
+    {
+      "name": "/voice",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/voice "
+    },
+    {
+      "name": "/web-setup",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/web-setup "
+    },
+    {
+      "name": "/workflow-authoring",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/workflow-authoring "
+    },
+    {
+      "name": "/workflows",
+      "description": "Claude 原生命令",
+      "source": "builtin",
+      "insertText": "/workflows "
+    }
+  ]
+}

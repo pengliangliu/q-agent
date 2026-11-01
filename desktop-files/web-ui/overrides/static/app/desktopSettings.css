@@ -1,0 +1,34 @@
+.desktop-settings-backdrop { position: fixed; inset: 0; z-index: 180; display: grid; place-items: center; padding: 20px; background: #0007; }
+.desktop-settings-panel { box-sizing: border-box; width: min(560px, 100%); max-height: calc(100dvh - 40px); overflow: auto; border: 1px solid var(--border-hi, #626262); border-radius: 14px; background: var(--bg, #212121); color: var(--text-hi, #ededed); box-shadow: 0 18px 70px #0005; font: 14px/1.5 var(--sans, 'Segoe UI', 'Microsoft YaHei', sans-serif); }
+.desktop-settings-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 24px 20px; border-bottom: 1px solid var(--border, #3d3d3d); }
+.desktop-settings-panel h2 { margin: 0; font-size: 20px; font-weight: 650; }
+.desktop-settings-panel header p { margin: 6px 0 0; color: var(--text-dim, #b8b8b8); font-size: 12px; }
+.desktop-settings-panel button, .desktop-settings-panel select, .desktop-settings-panel input { font: inherit; }
+.desktop-settings-panel button, .desktop-settings-panel select { border: 1px solid var(--border-hi, #626262); border-radius: 7px; color: inherit; background: var(--panel-2, #303030); }
+.desktop-settings-panel button { padding: 7px 10px; cursor: pointer; }
+.desktop-settings-panel .desktop-settings-close { flex: 0 0 auto; padding: 0 6px; border: 0; background: transparent; font-size: 24px; line-height: 1; }
+.desktop-settings-body { padding: 0 24px; }
+.desktop-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 21px 0; border-bottom: 1px solid var(--border, #3d3d3d); }
+.desktop-settings-row:last-child { border-bottom: 0; }
+.desktop-settings-row > span { min-width: 0; }
+.desktop-settings-row strong { display: block; font-size: 14px; font-weight: 600; }
+.desktop-settings-row small { display: block; margin-top: 5px; color: var(--text-dim, #b8b8b8); font-size: 12px; }
+.desktop-settings-row select { box-sizing: border-box; flex: 0 0 150px; width: 150px; padding: 7px 10px; }
+.desktop-settings-switch { appearance: none; flex: 0 0 38px; position: relative; width: 38px; height: 22px; margin: 0; border: 1px solid var(--border-hi, #626262); border-radius: 12px; background: var(--panel-2, #303030); cursor: pointer; }
+.desktop-settings-switch::before { content: ''; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-dim, #b8b8b8); transition: transform .12s; }
+.desktop-settings-switch:checked { background: var(--desktop-primary, #f2f2f2); border-color: var(--desktop-primary, #f2f2f2); }
+.desktop-settings-switch:checked::before { transform: translateX(16px); background: var(--desktop-primary-text, #171717); }
+.desktop-settings-panel > footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px 24px; border-top: 1px solid var(--border, #3d3d3d); }
+.desktop-settings-panel footer span { color: var(--text-dim, #b8b8b8); font-size: 11px; }
+.desktop-settings-panel :is(button,select,input):focus-visible { outline: 2px solid var(--desktop-focus, #b5b5b5); outline-offset: 3px; }
+.desktop-diagnostics { padding: 18px 0; border-top: 1px solid var(--border, #3d3d3d); }
+.desktop-diagnostics h3 { margin: 0 0 14px; font-size: 14px; font-weight: 600; }
+.desktop-diagnostics dl { margin: 0; }
+.desktop-diagnostics dl > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin: 8px 0; font-size: 12px; }
+.desktop-diagnostics dt { color: var(--text-dim, #b8b8b8); }
+.desktop-diagnostics dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.desktop-diagnostics p, .desktop-diagnostics > small { display: block; margin: 10px 0 0; color: var(--text-dim, #b8b8b8); font-size: 11px; }
+.desktop-diagnostics-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; }
+.desktop-diagnostics-actions button { font-size: 12px; }
+.desktop-diagnostics-actions button:disabled { opacity: .45; cursor: default; }
+@media (max-width: 560px) { .desktop-settings-backdrop { padding: 12px; } .desktop-settings-panel > header, .desktop-settings-panel > footer { padding: 18px; } .desktop-settings-body { padding: 0 18px; } .desktop-settings-row { gap: 14px; align-items: flex-start; } .desktop-settings-row select { flex-basis: 125px; width: 125px; } .desktop-settings-panel > footer { flex-wrap: wrap; } }

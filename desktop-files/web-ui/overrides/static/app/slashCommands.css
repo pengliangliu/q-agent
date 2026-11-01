@@ -1,0 +1,18 @@
+.chat-slash-menu { margin: 0 0 10px; border: 1px solid var(--border-hi, var(--chat-border)); border-radius: 12px; overflow: hidden; background: var(--chat-bg, var(--bg)); color: var(--chat-text, var(--text)); box-shadow: 0 8px 24px #0002; }
+.chat-slash-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--chat-border, var(--border)); }
+.chat-slash-header strong { font-size: 12px; font-weight: 600; }
+.chat-slash-header button { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--chat-muted, var(--muted)); font-size: 20px; line-height: 1; cursor: pointer; }
+.chat-slash-header button:hover { background: var(--desktop-hover, var(--card)); color: var(--text-hi); }
+.chat-slash-list { max-height: min(290px, 38vh); overflow-y: auto; overscroll-behavior: contain; padding: 4px; }
+.chat-slash-option { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; width: 100%; min-height: 48px; padding: 9px 10px; border: 0; border-radius: 7px; text-align: left; background: transparent; color: inherit; cursor: pointer; }
+.chat-slash-option.selected, .chat-slash-option:hover { background: var(--desktop-selected, var(--chat-raised)); }
+.chat-slash-name { overflow-wrap: anywhere; color: var(--text-hi, var(--chat-text)); font: 12px var(--mono, monospace); font-weight: 600; }
+.chat-slash-kind { color: var(--chat-muted, var(--muted)); font-size: 10px; white-space: nowrap; line-height: 18px; }
+.chat-slash-description { grid-column: 1 / -1; color: var(--chat-muted, var(--muted)); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chat-slash-empty { margin: 0; padding: 18px 14px; color: var(--chat-muted, var(--muted)); font-size: 12px; }
+.chat-slash-footer { padding: 8px 12px; border-top: 1px solid var(--chat-border, var(--border)); color: var(--chat-muted, var(--muted)); font-size: 11px; }
+.chat-slash-menu button:focus-visible { outline: 2px solid var(--desktop-focus, var(--chat-text)); outline-offset: -2px; }
+@media (max-width: 600px) {
+  .chat-slash-kind { font-size: 9px; }
+  .chat-slash-option { column-gap: 8px; }
+}

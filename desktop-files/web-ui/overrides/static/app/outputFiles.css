@@ -1,0 +1,18 @@
+.output-files { margin: 16px 0 10px; max-width: 100%; min-width: 0; }
+.output-files-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; color: var(--chat-muted, var(--text-dim, #a2a7b5)); font-size: 12px; font-weight: 600; }
+.output-files-heading span { font-size: 11px; font-weight: 400; opacity: .75; }
+.output-file-card { min-width: 0; border: 1px solid var(--chat-border, var(--border, #323641)); border-radius: 8px; padding: 10px 12px; margin-top: 6px; background: var(--chat-raised, var(--panel-2, #1e2029)); }
+.output-file-main { display: flex; gap: 9px; min-width: 0; }
+.output-file-kind { flex: none; color: var(--chat-muted, var(--text-dim, #a2a7b5)); }
+.output-file-info { min-width: 0; flex: 1; }
+.output-file-info strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.output-file-path { color: var(--chat-muted, var(--text-dim, #a2a7b5)); font: 11px/1.55 var(--font-mono, monospace); overflow-wrap: anywhere; user-select: text; margin-top: 3px; }
+.output-file-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.output-file-actions button, .output-files-expand, .output-file-choices button { font: inherit; font-size: 11px; color: var(--chat-muted, var(--text-dim, #a2a7b5)); border: 1px solid var(--chat-border, var(--border, #323641)); border-radius: 5px; background: transparent; padding: 4px 8px; cursor: pointer; }
+.output-file-actions button:hover, .output-files-expand:hover, .output-file-choices button:hover { color: var(--chat-text, var(--text-hi, #e4e7ef)); background: var(--panel-3, #30333e); }
+.output-file-actions button:disabled, .output-file-choices button:disabled { cursor: wait; opacity: .55; }
+.output-file-actions button:focus-visible, .output-files-expand:focus-visible, .output-file-choices button:focus-visible { outline: 2px solid var(--accent, #8aacff); outline-offset: 2px; }
+.output-files-expand { margin-top: 8px; }
+.output-file-status, .output-file-choices { margin-top: 7px; color: var(--chat-muted, var(--text-dim, #a2a7b5)); font-size: 11px; }
+.output-file-status.error { color: var(--error, #ff7c91); }
+.output-file-choices button { display: block; max-width: 100%; margin-top: 5px; text-align: left; overflow-wrap: anywhere; }

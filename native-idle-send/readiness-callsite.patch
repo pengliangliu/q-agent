@@ -1,0 +1,31 @@
+--- a/cmd/agent-deck/session_send_cmd.go
++++ b/cmd/agent-deck/session_send_cmd.go
+@@ -421,16 +421,18 @@
+ 		busyAcceptsInput = statusErr == nil && status == "running"
+ 	}
+ 	if !*noWait && !busyAcceptsInput {
+-		if err := send.WaitForAgentReady(tmuxSess, inst.Tool, *timeout, send.PromptGates{
+-			ClaudeComposer: session.IsClaudeCompatible(inst.Tool),
+-			CodexPrompt:    session.IsCodexCompatible(inst.Tool),
+-		}); err != nil {
+-			if acceptanceGuard != nil {
+-				acceptanceGuard.Release()
+-			}
+-			telemetry.ErrorOccurred(telemetry.AreaSend, telemetry.KindTimeout, inst.Tool)
+-			out.Error(fmt.Sprintf("timeout waiting for agent: %v", err), ErrCodeInvalidOperation)
+-			exitCLI(1)
++		if !fastQueuedReady(profile, inst, tmuxSess, *queueWorker, *requireInputPrompt, instances) {
++			if err := send.WaitForAgentReady(tmuxSess, inst.Tool, *timeout, send.PromptGates{
++				ClaudeComposer: session.IsClaudeCompatible(inst.Tool),
++				CodexPrompt:    session.IsCodexCompatible(inst.Tool),
++			}); err != nil {
++				if acceptanceGuard != nil {
++					acceptanceGuard.Release()
++				}
++				telemetry.ErrorOccurred(telemetry.AreaSend, telemetry.KindTimeout, inst.Tool)
++				out.Error(fmt.Sprintf("timeout waiting for agent: %v", err), ErrCodeInvalidOperation)
++				exitCLI(1)
++			}
+ 		}
+ 		// Issue #966: after a restart, Claude reaches "waiting" + composer
+ 		// visible before its slash-command parser registers. Bare `/foo`

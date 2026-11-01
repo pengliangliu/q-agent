@@ -1,0 +1,31 @@
+/* Local desktop additions use Agent Deck's existing palette and controls. */
+.desktop-attachments { flex: 0 0 auto; border-top: 1px solid var(--border); background: var(--surface, #16161e); padding: 10px 14px; font-family: var(--sans, sans-serif); }
+.desktop-file-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.desktop-file-toolbar .btn { white-space: nowrap; }
+.desktop-drop-hint, .desktop-file-actions > span { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.desktop-toolbar-spacer { flex: 1; }
+.desktop-file-input { display: none; }
+.desktop-file-list { display: flex; gap: 8px; flex-wrap: wrap; overflow-y: auto; max-height: 170px; margin-top: 10px; padding: 2px; }
+.desktop-file-card { display: flex; align-items: center; gap: 9px; padding: 8px; width: min(300px, 100%); min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg, #1a1b26); }
+.desktop-file-card.error { border-color: var(--tn-red, #f7768e); }
+.desktop-file-card.uploading { opacity: .78; }
+.desktop-file-preview, .desktop-file-symbol { flex: 0 0 40px; width: 40px; height: 40px; border-radius: 5px; object-fit: cover; background: var(--surface); }
+.desktop-file-symbol { display: grid; place-items: center; font-size: 25px; color: var(--muted); }
+.desktop-file-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.desktop-file-info strong { font-size: 12px; color: var(--text-hi); font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.desktop-file-info span { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.desktop-file-card.error .desktop-file-info span { color: var(--tn-red); }
+.desktop-file-remove { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 20px; padding: 2px 6px; border-radius: 4px; }
+.desktop-file-remove:hover { color: var(--tn-red); background: rgba(247,118,142,.1); }
+.desktop-file-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.desktop-file-feedback { margin: 8px 0 0; font-size: 12px; color: var(--tn-green, #9ece6a); }
+.desktop-file-feedback.error { color: var(--tn-red, #f7768e); }
+.desktop-drop-overlay { position: absolute; z-index: 25; inset: 5px; border: 2px dashed var(--accent, #7aa2f7); border-radius: 9px; background: rgba(20,24,39,.94); color: #c0caf5; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; pointer-events: none; }
+.desktop-drop-overlay strong { font-size: 20px; }
+.desktop-drop-overlay span { font-size: 13px; }
+.desktop-location-form { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.desktop-location-form label { font-size: 12px; color: var(--muted); }
+.desktop-location-form input { flex: 1; min-width: 180px; color: var(--text-hi); background: var(--bg, #1a1b26); border: 1px solid var(--border); border-radius: 5px; padding: 7px 9px; font-size: 12px; }
+.desktop-attachments button:focus-visible, .desktop-location-form input:focus-visible { outline: 2px solid var(--accent, #7aa2f7); outline-offset: 2px; }
+.desktop-attachments button:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 800px) { .desktop-drop-hint { flex-basis: 100%; order: 3; } .desktop-file-toolbar { gap: 6px; } .desktop-attachments { padding: 8px; } .desktop-toolbar-spacer { display: none; } .desktop-file-actions { align-items: flex-start; } .desktop-file-actions > span { max-width: 60%; } }

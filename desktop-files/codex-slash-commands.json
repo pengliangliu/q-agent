@@ -1,0 +1,519 @@
+{
+  "version": "0.163.0",
+  "source": "https://raw.githubusercontent.com/openai/codex/rust-v0.163.0/codex-rs/tui/src/slash_command.rs",
+  "note": "从已读取的精确版本源码整理；中文说明为概述。is_visible仅是基础可见性，运行时功能开关、账号与当前会话仍可能继续筛选。动态service-tier命令和技能不在此表。",
+  "commands": [
+    {
+      "name": "/model",
+      "description": "选择模型与推理强度",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/daybreak",
+      "description": "切换 Daybreak",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/ide",
+      "description": "设置 IDE 上下文",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/permissions",
+      "description": "设置操作权限",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/keymap",
+      "description": "配置快捷键",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/vim",
+      "description": "切换输入框 Vim 模式",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/setup-default-sandbox",
+      "description": "设置增强沙箱",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/experimental",
+      "description": "配置实验功能",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/approve",
+      "description": "为最近被自动审查拒绝的操作批准一次重试",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/memories",
+      "description": "设置记忆使用与生成",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/skills",
+      "description": "选择技能",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/import",
+      "description": "从 Claude Code 导入设置、项目和历史",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/hooks",
+      "description": "管理生命周期钩子",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/review",
+      "description": "审查当前修改",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/rename",
+      "description": "重命名当前会话",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/new",
+      "description": "开始新聊天",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/archive",
+      "description": "归档当前会话",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/delete",
+      "description": "永久删除当前会话",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/resume",
+      "description": "继续已保存聊天",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/fork",
+      "description": "从当前聊天创建分支",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/worktree",
+      "description": "在新工作树中开始或继续聊天",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/app",
+      "description": "在桌面应用中继续",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": false,
+      "internal": false
+    },
+    {
+      "name": "/init",
+      "description": "创建 AGENTS.md",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/compact",
+      "description": "压缩会话上下文",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/config",
+      "description": "设置 Codex 偏好",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/recap",
+      "description": "总结当前会话",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/plan",
+      "description": "切换到计划模式",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/voice",
+      "description": "控制语音或语音设置",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/goal",
+      "description": "设置或查看长期任务目标",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/agents",
+      "description": "打开代理控制中心",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/side",
+      "description": "开始临时分支对话",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/btw",
+      "description": "开始临时分支对话",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/copy",
+      "description": "复制最近回复或其中一部分",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/export",
+      "description": "导出 Markdown 会话",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/raw",
+      "description": "切换便于复制的原始终端滚动视图",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/tui",
+      "description": "选择下次启动使用的终端界面",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/diff",
+      "description": "显示 Git 修改",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/mention",
+      "description": "引用文件",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/status",
+      "description": "查看会话设置与 token 使用情况",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/daemon",
+      "description": "管理本地后台服务",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/warnings",
+      "description": "查看保留的警告与诊断",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/cd",
+      "description": "更换工作目录",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/pwd",
+      "description": "查看工作目录",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/usage",
+      "description": "查看账号用量或使用额度重置",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/debug-config",
+      "description": "查看配置来源",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/title",
+      "description": "设置终端标题",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/statusline",
+      "description": "设置状态栏",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/theme",
+      "description": "选择语法高亮主题",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/pets",
+      "description": "选择或隐藏终端宠物",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/mcp",
+      "description": "查看 MCP 工具或登录 MCP 服务",
+      "supportsInlineArgs": true,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/apps",
+      "description": "管理应用",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/plugins",
+      "description": "浏览插件",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/logout",
+      "description": "退出账号",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/quit",
+      "description": "退出 Codex",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/exit",
+      "description": "退出 Codex",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/feedback",
+      "description": "发送诊断反馈",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/rollout",
+      "description": "查看会话记录路径",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": false,
+      "internal": false
+    },
+    {
+      "name": "/ps",
+      "description": "查看后台终端",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/stop",
+      "description": "停止所有后台终端",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/clear",
+      "description": "清空终端并开始新聊天",
+      "supportsInlineArgs": true,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/test-approval",
+      "description": "测试审批请求",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": false,
+      "internal": true
+    },
+    {
+      "name": "/subagents",
+      "description": "切换当前会话的子代理",
+      "supportsInlineArgs": false,
+      "availableDuringTask": true,
+      "visibleOnLinux": true,
+      "internal": false
+    },
+    {
+      "name": "/debug-m-drop",
+      "description": "内部调试命令，请勿使用",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": true
+    },
+    {
+      "name": "/debug-m-update",
+      "description": "内部调试命令，请勿使用",
+      "supportsInlineArgs": false,
+      "availableDuringTask": false,
+      "visibleOnLinux": true,
+      "internal": true
+    }
+  ]
+}

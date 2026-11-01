@@ -1,0 +1,7 @@
+.agent-deck-brand-icon {
+  display: block;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
