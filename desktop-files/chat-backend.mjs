@@ -4,7 +4,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { codexApprovalPrompt as approvalPrompt, claudePrompt, pendingClaudeRequest, pendingCodexRequest, publicPrompt,
-  validateClaudeAnswer, answerClaudePrompt } from './prompt-adapter.mjs';
+  validateClaudeAnswer, answerClaudePrompt, claudeQuestionResult } from './prompt-adapter.mjs';
 import { acquireNativeControl } from './native-controls.mjs';
 import { deliverNow, deliverNowInfo } from './deliver-now.mjs';
 import { codexQueuedInput as nativeQueuedInput, deliveryIdentity } from './deliver-now-control.mjs';
@@ -22,6 +22,20 @@ const activeSends = new Set();
 const activeResponses = new Set();
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9-]{8,100}$/.test(value);
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
+const questionMessages = {
+  accepted: '原生会话已确认收到回答。',
+  rejected: '原生会话拒绝或取消了本次回答，尚未确认接受；请核对当前会话。',
+  cancelled: '原生会话已确认取消当前问题。',
+  'next-step': '已进入下一确认步骤，请继续完成当前问题。',
+  pending: '已发送选择，正在等待原生会话确认；不会自动再次提交。',
+};
+
+function questionReceipt(record) {
+  if (!record?.requestId || !Object.hasOwn(questionMessages, record.outcome)) return {};
+  return { action: record.action, requestId: record.requestId, finalKeyAttempted: record.finalKeyAttempted === true,
+    finalKeySent: record.finalKeySent === true, verified: record.verified === true, outcome: record.outcome,
+    nextPromptId: record.nextPromptId || null };
+}
 
 async function cachedSession(id, api, fresh = false) {
   if (!identifier(id)) throw new Error('请选择有效会话。');
@@ -84,9 +98,13 @@ async function responseStatus(row, prompt) {
   const record = await fsp.readFile(path.join(receipts, `prompt-${hash(key)}.json`), 'utf8').then(JSON.parse).catch(() => null);
   if (!record || record.sessionId !== row.id || record.promptId !== prompt.id) return null;
   const requestActive = activeResponses.has(key);
+  const question = questionReceipt(record);
+  const explanation = question.outcome === 'pending' && !question.finalKeySent
+    ? record.reason || '选项操作尚未完成，最终确认还未核实送达；请刷新核对，系统不会自动重发。'
+    : questionMessages[question.outcome];
   return { promptId: prompt.id, state: requestActive ? 'posting' : 'unknown', requestActive,
-    canStopTracking: !requestActive, inputBlocked: true,
-    message: requestActive ? '正在提交当前回答。' : record.reason || '原确认已经尝试提交；当前问题仍在等待核对。请查询原状态或在独立终端检查。' };
+    canStopTracking: !requestActive, inputBlocked: true, ...question,
+    message: requestActive ? '正在提交当前回答。' : explanation || record.reason || '原确认已经尝试提交；当前问题仍在等待核对。请查询原状态或在独立终端检查。' };
 }
 
 async function startSession(id, api) {
@@ -198,6 +216,7 @@ async function respondToPrompt(row, body, api) {
       return { code: 409, body: { success: false, keySent: false, prompt: publicPrompt(prompt), error: '当前确认内容已变化，请刷新后重新选择。' } };
     }
     const answer = row.tool === 'claude' ? validateClaudeAnswer(prompt, body) : null;
+    const nativeQuestion = row.tool === 'claude' && ['question', 'review'].includes(prompt.type);
     if (row.tool === 'codex' && (!prompt.options.some(option => option.value === String(body.choice)) ||
         body.text !== undefined || body.choices !== undefined || (body.action && body.action !== 'submit'))) {
       return { code: 400, body: { success: false, keySent: false, error: '请选择当前显示的权限选项。' } };
@@ -207,6 +226,8 @@ async function respondToPrompt(row, body, api) {
     await fsp.mkdir(receipts, { recursive: true, mode: 0o700 });
     marker = path.join(receipts, `prompt-${hash(`${row.id}:${prompt.id}`)}.json`);
     record = { sessionId: row.id, promptId: prompt.id, stage: 'reserved', keySent: false, createdAt: new Date().toISOString() };
+    if (nativeQuestion) Object.assign(record, { action: answer.cancel ? 'cancel' : 'submit', requestId: prompt._native.requestId,
+      finalKeyAttempted: false, finalKeySent: false, verified: false, outcome: 'pending', nextPromptId: null });
     try {
       const file = await fsp.open(marker, 'wx', 0o600);
       try { await file.writeFile(JSON.stringify(record)); await file.sync(); } finally { await file.close(); }
@@ -236,18 +257,38 @@ async function respondToPrompt(row, body, api) {
       const native = await answerClaudePrompt(prompt, answer, {
         read,
         pause: () => new Promise(resolve => setTimeout(resolve, 150)),
-        send: async args => {
+        send: async (args, final = false) => {
           record.keySent = null;
+          if (nativeQuestion && final) record.finalKeyAttempted = true;
           await saveReceipt(marker, record);
           const output = await cli(api, row, ['session', 'send-keys', row.id, ...args, '--primary', '--json']);
           if (output.success !== true || (output.session_id && output.session_id !== row.id)) throw new Error('未能确认按键已送达原会话。');
           record.keySent = true;
+          if (nativeQuestion && final) record.finalKeySent = true;
+          if (nativeQuestion) await saveReceipt(marker, record);
         },
       });
-      result = { success: true, keySent: native.keySent, verified: native.prompt?.id !== prompt.id,
-        prompt: publicPrompt(native.prompt), message: native.prompt ? '已更新当前确认步骤。' : '已发送确认，正在等待会话更新。' };
+      if (nativeQuestion) {
+        let outcome = null;
+        const nextPromptId = native.prompt?.supported && native.prompt.id !== prompt.id ? native.prompt.id : null;
+        const nextStep = nextPromptId && native.prompt._native?.requestId === record.requestId;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          outcome = await claudeQuestionResult(row.transcript_path, record.requestId).catch(() => null);
+          if (outcome) break;
+          if (nextStep) { outcome = 'next-step'; break; }
+          if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 400));
+        }
+        outcome = outcome === 'rejected' && answer.cancel ? 'cancelled' : outcome || 'pending';
+        Object.assign(record, { verified: outcome !== 'pending', outcome, nextPromptId });
+        result = { success: outcome !== 'rejected', keySent: native.keySent, ...questionReceipt(record),
+          state: outcome === 'pending' ? 'waiting' : outcome, prompt: publicPrompt(native.prompt), message: questionMessages[outcome],
+          ...(outcome === 'rejected' ? { unknown: false, reason: 'native_question_rejected', error: questionMessages.rejected } : {}) };
+      } else {
+        result = { success: true, keySent: native.keySent, verified: native.prompt?.id !== prompt.id,
+          prompt: publicPrompt(native.prompt), message: native.prompt ? '已更新当前确认步骤。' : '已发送确认，正在等待会话更新。' };
+      }
     }
-    record = { ...record, stage: result.success ? 'sent' : 'unknown', keySent: result.keySent };
+    record = { ...record, stage: result.outcome === 'rejected' ? 'rejected' : result.success ? 'sent' : 'unknown', keySent: result.keySent };
     await saveReceipt(marker, record);
     prompts.delete(row.id); sessions.delete(row.id);
     return { code: result.success ? 200 : 409, body: result };
@@ -260,7 +301,7 @@ async function respondToPrompt(row, body, api) {
     const prompt = await currentPrompt(await cachedSession(row.id, api, true), api, true).catch(() => null);
     const keySent = record ? record.keySent : (error.keySent ? null : false);
     return { code: 409, body: { success: false, keySent, unknown: keySent !== false,
-      prompt: publicPrompt(prompt), error: error.message } };
+      ...(prompt?.id === record?.promptId ? questionReceipt(record) : {}), prompt: publicPrompt(prompt), error: error.message } };
   } finally { activeResponses.delete(responseKey); release(); }
 }
 

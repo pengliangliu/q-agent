@@ -54,6 +54,22 @@ export async function pendingClaudeRequest(file, content) {
     return visible.length === 1 ? visible[0] : null;
 }
 
+// Only the exact native call's result proves that an answer was accepted.
+// Return no answer text or tool output to the caller.
+export async function claudeQuestionResult(file, requestId) {
+  if (typeof requestId !== 'string' || !requestId) return null;
+  for (const record of (await transcriptRecords(file) || []).reverse()) {
+    if (record.isSidechain || record.type !== 'user' || !Array.isArray(record.message?.content)) continue;
+    for (const block of record.message.content) {
+      if (block.type !== 'tool_result' || block.tool_use_id !== requestId) continue;
+      if (block.is_error === true) return 'rejected';
+      if (block.is_error === undefined || block.is_error === false) return 'accepted';
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function pendingCodexRequest(file) {
   const calls = new Map(), completed = new Set();
   for (const record of await transcriptRecords(file) || []) {
@@ -230,6 +246,8 @@ export function validateClaudeAnswer(prompt, body) {
 export async function answerClaudePrompt(original, answer, io) {
   let current = original;
   let sent = false;
+  let finalKeyAttempted = false, finalKeySent = false;
+  const result = prompt => ({ prompt, keySent: sent, finalKeyAttempted, finalKeySent });
   const unchanged = prompt => {
     if (!prompt || prompt.id !== original.id) throw new Error('当前问题内容已变化，操作已停止。');
     return prompt;
@@ -240,7 +258,9 @@ export async function answerClaudePrompt(original, answer, io) {
     const fresh = unchanged(await io.read());
     if (state(fresh) !== state(current)) throw new Error('原生选项已被其他操作改变，请刷新后核对。');
     sent = true;
-    await io.send(args);
+    if (final) finalKeyAttempted = true;
+    await io.send(args, final);
+    if (final) finalKeySent = true;
     await io.pause();
     const after = await io.read();
     if (!final) current = unchanged(after);
@@ -262,8 +282,8 @@ export async function answerClaudePrompt(original, answer, io) {
   }
   try {
     if (answer.cancel) {
-      if (original.type === 'review') { await move(1); return { prompt: await press(['--enter'], true), keySent: true }; }
-      return { prompt: await press(['--named-key', 'Escape'], true), keySent: true };
+      if (original.type === 'review') { await move(1); return result(await press(['--enter'], true)); }
+      return result(await press(['--named-key', 'Escape'], true));
     }
     if (original.type === 'question' && original.multiple) {
       for (let index = 0; index < original.options.length; index++) {
@@ -285,9 +305,11 @@ export async function answerClaudePrompt(original, answer, io) {
       }
       await move(original.options.length); // The native Next row, never the adjacent Chat action.
     } else await move(answer.target);
-    return { prompt: await press(['--enter'], true), keySent: true };
+    return result(await press(['--enter'], true));
   } catch (error) {
     error.keySent = sent;
+    error.finalKeyAttempted = finalKeyAttempted;
+    error.finalKeySent = finalKeySent;
     throw error;
   }
 }

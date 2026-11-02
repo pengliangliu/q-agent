@@ -467,7 +467,8 @@ function SessionChat({ sessionId }) {
         const messages = [...known.values()]
         const response = promptRevision === store.promptRevision && history.responseStatus && history.responseStatus.promptId === history.prompt?.id
           ? { ...store.promptResponse, ...history.responseStatus } : store.promptResponse
-        const promptResponse = conversationChanged || (response && (response.state === 'stale' ? promptRefreshRequested : response.promptId !== history.prompt?.id)) ? null : response
+        const differentVerifiedPrompt = history.prompt?.supported === true && history.prompt.id && response?.promptId !== history.prompt.id
+        const promptResponse = conversationChanged || (response && (response.state === 'stale' ? promptRefreshRequested || differentVerifiedPrompt : response.promptId !== history.prompt?.id)) ? null : response
         update({ messages, history: store.olderLoaded && !conversationChanged ? { ...history, hasMore: store.history.hasMore, before: store.before } : history,
           loaded: true, promptResponse, ...(conversationChanged ? { olderLoaded: false, before: null } : {}) })
         setSuggestionSynced(true)
@@ -773,18 +774,23 @@ function SessionChat({ sessionId }) {
       store.promptResponse || store.responding || commandPosting.current || readOnly || historyError || selectedIdSignal.value !== sessionId) return
     const promptId = prompt.id
     update({ responding: true, promptRevision: (store.promptRevision || 0) + 1, promptResponse: { promptId, state: 'posting' } })
+    setError(''); setNotice('')
     try {
       const data = await request('/desktop/chat/respond', { sessionId, promptId, ...answer })
       const next = Object.prototype.hasOwnProperty.call(data, 'prompt') ? { ...store.history, prompt: data.prompt } : store.history
       beforeMessages()
       update({ history: next, promptRevision: (store.promptRevision || 0) + 1, promptResponse: next.prompt?.id !== promptId ? null : { promptId, state: 'waiting', message: data.message || '选择已发送，正在等待会话更新。' } })
+      if (alive.current && data.outcome === 'pending') setNotice('本次提交结果尚待核对，请查看会话后续状态。')
+      else if (alive.current && ['accepted', 'cancelled', 'next-step'].includes(data.outcome) && data.message) setNotice(data.message)
     } catch (err) {
       const stale = err.status === 409 && err.data?.keySent === false && !err.data?.unknown
       const notSent = err.data?.keySent === false && !err.data?.unknown
+      const rejected = err.data?.outcome === 'rejected'
+      if (rejected && alive.current) setError(err.message)
       update({ promptRevision: (store.promptRevision || 0) + 1,
         ...(Object.prototype.hasOwnProperty.call(err.data || {}, 'prompt') ? { history: { ...store.history, prompt: err.data.prompt } } : {}),
         promptResponse: { promptId, state: stale || notSent ? 'stale' : 'unknown',
-          message: (stale ? '提示已过期，请刷新后重新查看并选择。' : notSent ? '回答未提交，请刷新后重新选择。' : '提交结果待确认。已暂停重复提交，请刷新查询当前状态。') + (err.message ? ' ' + err.message : '') } })
+          message: rejected ? err.message : (stale ? '提示已过期，请刷新后重新查看并选择。' : notSent ? '回答未提交，请刷新后重新选择。' : '提交结果待确认。已暂停重复提交，请刷新查询当前状态。') + (err.message ? ' ' + err.message : '') } })
     } finally { update({ responding: false }); if (alive.current) refreshRef.current?.() }
   }
 
@@ -964,6 +970,7 @@ function SessionChat({ sessionId }) {
         disabled=${readOnly || Boolean(historyError) || commandPosting.current} onRefresh=${() => refreshCommand(true)} onRespond=${respondCommand}
         onTerminal=${openTerminal} openingTerminal=${openingTerminal} onDismiss=${() => update({ pendingCommand: null })} onStopTracking=${() => stopTracking('command')} />`}
       ${(requiresAction || store.promptResponse) && (!store.pendingCommand?.prompt || verifiedPrompt) && html`<${InlinePrompt} key=${prompt?.id || 'unrecognized'} prompt=${prompt} response=${store.promptResponse}
+        autoSubmitSingle=${prompt?.type === 'question' && prompt.questionCount >= 1}
         disabled=${readOnly || Boolean(historyError) || store.responding || commandPosting.current} onRespond=${respond} onRefresh=${() => refreshRef.current?.(true)} onAdvanced=${openAdvanced} advancedLoading=${advancedLoading}
         onStopTracking=${() => { if (store.promptResponse?.canStopTracking && !store.responding) update({ promptResponse: { ...store.promptResponse, trackingStopped: true } }) }} />`}
       ${requestIssue && html`<section class=${'chat-pending chat-request-issue ' + requestIssue.state} role=${requestIssue.state === 'failed' ? 'alert' : 'status'} aria-label="请求状态">
