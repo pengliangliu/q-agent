@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { codexApprovalPrompt as approvalPrompt, claudePrompt, pendingClaudeRequest, pendingCodexRequest, publicPrompt,
   validateClaudeAnswer, answerClaudePrompt, claudeQuestionResult } from './prompt-adapter.mjs';
-import { acquireNativeControl } from './native-controls.mjs';
+import { acquireNativeControl, sendVerifiedMenuKey } from './native-controls.mjs';
 import { deliverNow, deliverNowInfo } from './deliver-now.mjs';
 import { codexQueuedInput as nativeQueuedInput, deliveryIdentity } from './deliver-now-control.mjs';
 import { nativeSuggestion } from './native-suggestions.mjs';
@@ -261,7 +261,8 @@ async function respondToPrompt(row, body, api) {
           record.keySent = null;
           if (nativeQuestion && final) record.finalKeyAttempted = true;
           await saveReceipt(marker, record);
-          const output = await cli(api, row, ['session', 'send-keys', row.id, ...args, '--primary', '--json']);
+          const output = args[0] === '--named-key' ? await sendVerifiedMenuKey(row, args[1], api)
+            : await cli(api, row, ['session', 'send-keys', row.id, ...args, '--primary', '--json']);
           if (output.success !== true || (output.session_id && output.session_id !== row.id)) throw new Error('未能确认按键已送达原会话。');
           record.keySent = true;
           if (nativeQuestion && final) record.finalKeySent = true;

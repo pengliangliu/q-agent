@@ -42,6 +42,11 @@ async function run(mode) {
   const api = {
     deck: 'synthetic-deck', session: async () => row, bodyJSON: async req => req.body,
     reply: (res, code, body) => Object.assign(res, { code, body }),
+    execInput: async (command, args, input) => {
+      assert(args.includes('--stream') && args.includes('--primary'));
+      assert.match(input, /^N (?:Up|Down|Left|Right|Enter|Escape|Space)\n$/);
+      return api.exec(command, [...args.filter(value => value !== '--stream'), '--named-key', input.slice(2, -1)]);
+    },
     exec: async (command, args) => {
       if (command === '/usr/bin/python3') return { stdout: JSON.stringify({ messages: [] }) };
       if (args.includes('output')) return { stdout: JSON.stringify({ success: true, session_id: id, content: pane() }) };

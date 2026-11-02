@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { acquireNativeControl, nativeComposer } from './native-controls.mjs';
+import { acquireNativeControl, nativeComposer, sendVerifiedMenuKey } from './native-controls.mjs';
 
 const receipts = path.join(os.homedir(), '.local/share/agent-deck/chat-receipts/models');
 const active = new Map();
@@ -306,7 +306,7 @@ export async function applyNativeModel(tool, target, io) {
   async function press(args, changingStage = false) {
     const before = modelMenu(tool, await io.read());
     if (!before || menuState(before) !== menuState(menu)) throw new Error('原生菜单已被其他操作改变，操作已停止。');
-    await io.send(args); await io.pause(); raw = await io.read();
+    await io.send(args, { verifiedMenu: true }); await io.pause(); raw = await io.read();
     let after = modelMenu(tool, raw);
     for (let attempt = 0; !after && !modelComposer(tool, raw) && attempt < 3; attempt++) {
       await io.pause(); raw = await io.read(); after = modelMenu(tool, raw);
@@ -389,9 +389,11 @@ async function run(record, state, api) {
         if (hash(identity(actual)) !== hash(record.identity)) throw new Error('原生会话身份已变化，设置核对已停止。');
         return nativeSessionCurrent(actual, state.models, api).catch(() => null);
       },
-      send: async args => {
+      send: async (args, context) => {
         record.keySent = null; await save(record);
-        const result = await cli(api, state.row, ['session', 'send-keys', record.sessionId, ...args, '--primary', '--json']);
+        const result = context?.verifiedMenu && args[0] === '--named-key'
+          ? await sendVerifiedMenuKey(state.row, args[1], api)
+          : await cli(api, state.row, ['session', 'send-keys', record.sessionId, ...args, '--primary', '--json']);
         if (!result.success || (result.session_id && result.session_id !== record.sessionId)) throw new Error('按键送达结果未确认。');
         record.keySent = true;
       },

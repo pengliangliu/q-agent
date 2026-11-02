@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { acquireNativeControl, nativeComposer } from './native-controls.mjs';
+import { acquireNativeControl, nativeComposer, sendVerifiedMenuKey } from './native-controls.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const receipts = path.join(os.homedir(), '.local/share/agent-deck/chat-receipts/commands');
@@ -191,8 +191,7 @@ async function respondToCommand(record, body, api) {
       const actual = commandPrompt(await pane(current, api), record.requestId);
       if (!actual || actual.id !== prompt.id || actual._cursor !== prompt._cursor) throw new Error('原生菜单已变化，操作已停止。');
       touched = true;
-      const result = await cli(api, current, ['session', 'send-keys', current.id,
-        '--named-key', key, '--primary', '--json']);
+      const result = await sendVerifiedMenuKey(current, key, api);
       if (!result.success) throw new Error('按键送达结果未知，请查看当前界面。');
       await pause();
     };

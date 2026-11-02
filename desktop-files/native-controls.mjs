@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+
 // All native menu/approval/model actions share one short-lived session lock.
 const active = new Set();
 
@@ -5,6 +7,29 @@ export function acquireNativeControl(sessionId) {
   if (active.has(sessionId)) return null;
   active.add(sessionId);
   return () => active.delete(sessionId);
+}
+
+// Call only after rereading and matching the active native menu. The CLI's
+// ordinary bare-key guard mistakes dim menu numbers for composer suggestions
+// in 16-color terminals and presses Escape. Its TUI stream path sends the exact
+// named key to the same authoritative primary window, without that extra key.
+export async function sendVerifiedMenuKey(row, key, api) {
+  if (!['Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Space'].includes(key)) throw new Error('原生菜单按键无效。');
+  const args = [...(row.profile ? ['-p', row.profile] : []), 'session', 'send-keys', row.id, '--stream', '--primary', '--json'];
+  const input = 'N ' + key + '\n';
+  const options = { timeout: 20000, maxBuffer: 2 * 1024 * 1024 };
+  const execute = api.execInput || ((file, arguments_, text, settings) => new Promise((resolve, reject) => {
+    const child = execFile(file, arguments_, settings, (error, stdout) => {
+      if (error && !stdout) reject(error);
+      else resolve({ stdout });
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(text);
+  }));
+  try {
+    const { stdout } = await execute(api.deck, args, input, options);
+    return JSON.parse(stdout);
+  } catch { throw new Error('原生菜单按键结果未确认，请刷新核对；不会自动重发。'); }
 }
 
 const clean = value => String(value || '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r/g, '');
