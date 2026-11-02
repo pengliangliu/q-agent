@@ -77,7 +77,7 @@ $files += @(
     'DesktopSettings.js', 'DiagnosticsSettings.js', 'icon.css', 'InlinePrompt.js',
     'main.js', 'NativeTerminalPanel.js', 'outputFileReferences.js', 'outputFiles.css',
     'OutputFiles.js', 'paneRegistry.js', 'project.css', 'ProjectActions.js',
-    'ProjectDialog.js', 'SessionModelControls.js', 'Sidebar.js', 'SlashCommandMenu.js',
+    'ProjectDialog.js', 'SessionModelControls.js', 'Sidebar.js', 'SlashCommandMenu.js', 'slashCommandPolicy.js',
     'slashCommands.css', 'terminalLinks.js', 'TerminalPanel.js', 'Topbar.js',
     'uiOperations.js', 'uiState.js'
 ) | ForEach-Object { 'desktop-files/web-ui/overrides/static/app/' + $_ }

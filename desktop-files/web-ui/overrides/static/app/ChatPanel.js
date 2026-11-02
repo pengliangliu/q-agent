@@ -9,6 +9,7 @@ import { InlinePrompt } from './InlinePrompt.js'
 import { SessionModelControls } from './SessionModelControls.js'
 import { ChatQuota } from './ChatQuota.js'
 import { SlashCommandMenu, filterSlashCommands, slashInsertText } from './SlashCommandMenu.js'
+import { slashCommandPolicy } from './slashCommandPolicy.js'
 import { CommandResult } from './CommandResult.js'
 import { OutputFiles } from './OutputFiles.js'
 import { beginUiMutation } from './uiOperations.js'
@@ -296,6 +297,7 @@ function SessionChat({ sessionId }) {
   const [commandsError, setCommandsError] = useState('')
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashIndex, setSlashIndex] = useState(0)
+  const [commandConfirmation, setCommandConfirmation] = useState(null)
   const [suggestionSynced, setSuggestionSynced] = useState(false)
   const scrollRef = useRef(null)
   const threadRef = useRef(null)
@@ -310,6 +312,8 @@ function SessionChat({ sessionId }) {
   const scrollRestore = useRef(null)
   const dragDepth = useRef(0)
   const commandPosting = useRef(false)
+  const confirmationRef = useRef(null)
+  const modelBusyRef = useRef(false)
   const session = menuModelSignal.value.sessions.find(item => item.id === sessionId)
   const ancestors = []
   const visited = new Set([sessionId])
@@ -810,13 +814,45 @@ function SessionChat({ sessionId }) {
     setSlashOpen(false)
   }
 
-  function chooseCommand(command) {
-    const name = command.name?.toLowerCase()
-    if (['/model', '/effort'].includes(name) || ['model', 'effort'].includes(command.action)) {
-      update({ draft: '' }); openModelControls(name || '/' + command.action)
+  function clearCommandConfirmation() {
+    confirmationRef.current = null; setCommandConfirmation(null)
+  }
+
+  function chooseCommand(command, fillOnly = false) {
+    clearCommandConfirmation()
+    const policy = slashCommandPolicy(command, session?.tool)
+    if (!fillOnly && policy.mode === 'model') {
+      update({ draft: '' }); openModelControls(command.name)
+    } else if (!fillOnly && policy.mode === 'execute') {
+      runCommand(command.name)
     } else {
-      update({ draft: slashInsertText(command) }); setSlashOpen(false); inputRef.current?.focus()
+      update({ draft: slashInsertText(command) }); setSlashOpen(false); setError('')
+      if (!fillOnly && policy.mode === 'confirm') confirmCommand(command.name, policy.message)
+      else setNotice(fillOnly ? '命令已填入，按 Enter 执行。' : policy.message)
+      inputRef.current?.focus()
     }
+  }
+
+  function confirmCommand(command, message) {
+    const confirmation = { command, message }
+    confirmationRef.current = confirmation; setCommandConfirmation(confirmation)
+  }
+
+  function commandBlockedReason() {
+    const current = menuModelSignal.value.sessions.find(item => item.id === sessionId)
+    const status = store.history.status || current?.status
+    if (!alive.current || selectedIdSignal.value !== sessionId) return '会话已切换，请在当前会话重新选择命令。'
+    if (readOnlySignal.value || store.history.readOnly) return '当前界面为只读，无法执行命令。'
+    if (!['claude', 'codex'].includes(current?.tool)) return '此会话不支持原生命令。'
+    if (starting || ['stopped', 'error', 'dead', 'new', 'starting'].includes(status)) return '请先启动当前会话。'
+    if (store.files.length) return '命令不支持附件，请移除附件后执行。'
+    if (store.pending || store.sending) return '会话还有待送达消息，请等待送达后执行命令。'
+    if (commandPosting.current || store.pendingCommand && !['done', 'failed'].includes(store.pendingCommand.state)) return '上一条命令尚未结束，请先处理当前命令。'
+    if (store.history.prompt || store.responding || /approval|permission|user-input|blocked/.test(store.history.substate || current?.raw?.substate || '')) return '请先完成当前会话中的选择或确认。'
+    if (modelBusyRef.current) return '模型设置正在处理，请完成后再执行命令。'
+    if (store.history.turnRunning ?? status === 'running') return '会话正在处理，请完成后再执行命令。'
+    if (historyError || !store.loaded || store.history.canSend === false) return '会话状态尚未同步，请连接并刷新后再执行命令。'
+    return ''
   }
 
   function applyCommandRecord(record) {
@@ -847,13 +883,20 @@ function SessionChat({ sessionId }) {
     }
   }
 
-  async function runCommand() {
-    if (!canSubmitDraft || commandPosting.current || selectedIdSignal.value !== sessionId) return
-    const command = store.draft.trim()
+  async function runCommand(commandText = store.draft, confirmed = false) {
+    const blocked = commandBlockedReason()
+    if (blocked) { if (alive.current) setError(blocked); return }
+    const command = commandText.trim()
     const modelCommand = /^\/(model|effort)(?:\s+([\s\S]*))?$/i.exec(command)
     if (modelCommand) { update({ draft: '' }); openModelControls('/' + modelCommand[1].toLowerCase(), (modelCommand[2] || '').trim()); return }
+    const entry = commands.find(item => item.name === command.split(/\s/, 1)[0])
+    const policy = slashCommandPolicy(entry, session?.tool)
+    if (policy.mode === 'confirm' && !confirmed) {
+      update({ draft: command }); setSlashOpen(false); setNotice(''); confirmCommand(command, policy.message); return
+    }
+    clearCommandConfirmation()
     const record = { sessionId, requestId: crypto.randomUUID(), command, state: 'running', submittedAt: new Date().toISOString() }
-    commandPosting.current = true; setSlashOpen(false); setError(''); beforeMessages()
+    commandPosting.current = true; setSlashOpen(false); setError(''); setNotice('正在执行 ' + command.split(/\s/, 1)[0] + '…'); beforeMessages()
     update({ commandRevision: (store.commandRevision || 0) + 1, pendingCommand: record, draft: '' })
     try {
       applyCommandRecord(await request('/desktop/chat/command', { sessionId, command, requestId: record.requestId }, undefined, true))
@@ -862,7 +905,7 @@ function SessionChat({ sessionId }) {
         if (err.data?.requestId === record.requestId && err.data.sessionId === sessionId) applyCommandRecord(err.data)
         else update({ pendingCommand: { ...record, state: err.data?.keySent === false ? 'failed' : 'unknown', message: err.message || '命令提交结果待确认。' } })
       }
-    } finally { commandPosting.current = false; update(); if (alive.current) refreshRef.current?.() }
+    } finally { commandPosting.current = false; if (alive.current) setNotice(''); update(); if (alive.current) refreshRef.current?.() }
   }
 
   async function respondCommand(answer) {
@@ -916,7 +959,7 @@ function SessionChat({ sessionId }) {
       <div class="chat-header-actions"><${ChatQuota} key=${'quota:' + sessionId} sessionId=${sessionId} tool=${session?.tool} />
         <${SessionModelControls} key=${sessionId + ':' + session?.tool} sessionId=${sessionId} tool=${session?.tool}
         disabled=${readOnly || stopped || running || starting || requiresAction || Boolean(store.pending) || Boolean(commandPending)}
-        openRequest=${modelOpenRequest} onBusyChange=${setModelBusy} onApplied=${() => refreshRef.current?.()} />
+        openRequest=${modelOpenRequest} onBusyChange=${value => { modelBusyRef.current = value; setModelBusy(value) }} onApplied=${() => refreshRef.current?.()} />
         <button type="button" class="chat-terminal-button" title="在独立终端打开" aria-label="在独立终端打开" disabled=${openingTerminal} onClick=${openTerminal}>
           <span aria-hidden="true">›_</span><span class="chat-terminal-label">${openingTerminal ? '正在打开…' : '独立终端'}</span></button>
         <button type="button" class="chat-icon-button" title="打开项目文件夹" aria-label="打开项目文件夹" onClick=${() => reveal()}>▱</button>
@@ -997,6 +1040,14 @@ function SessionChat({ sessionId }) {
       ${(error || notice) && html`<div class=${'chat-feedback ' + (error ? 'error' : '')} role=${error ? 'alert' : 'status'}><span>${error || notice}</span><button type="button" aria-label="关闭提示" onClick=${() => { setError(''); setNotice('') }}>×</button></div>`}
       <${SlashCommandMenu} tool=${session?.tool} draft=${store.draft} commands=${commands} loading=${commandsLoading} error=${commandsError}
         open=${commandMenuOpen} activeIndex=${slashIndex} onActiveIndexChange=${setSlashIndex} onChoose=${chooseCommand} onClose=${() => setSlashOpen(false)} />
+      ${commandConfirmation && html`<section class="chat-pending" role="alert" aria-label="执行命令确认">
+        <strong translate="no">${commandConfirmation.command}</strong><p>${commandConfirmation.message}</p>
+        <button type="button" onClick=${clearCommandConfirmation}>取消</button>
+        <button type="button" onClick=${() => {
+          if (confirmationRef.current !== commandConfirmation || store.draft.trim() !== commandConfirmation.command) return
+          runCommand(commandConfirmation.command, true)
+        }}>确认执行</button>
+      </section>`}
       <form class=${'chat-composer ' + (readOnly ? 'readonly' : '')} onSubmit=${event => { event.preventDefault(); send() }}>
         ${store.files.length > 0 && html`<div class="chat-files chat-draft-files">${store.files.map(file => html`<${FileCard} key=${file.id} file=${file} reveal=${reveal} remove=${store.sending ? undefined : () => removeFile(file)} />`)}</div>`}
         <textarea ref=${inputRef} value=${store.draft} rows="2" aria-label="消息输入框" disabled=${readOnly}
@@ -1004,7 +1055,7 @@ function SessionChat({ sessionId }) {
           aria-controls=${commandMenuOpen && commandChoices.length ? 'chat-slash-command-list' : undefined}
           aria-expanded=${commandMenuOpen} aria-autocomplete="list" aria-activedescendant=${commandMenuOpen && commandChoices.length ? 'chat-slash-command-list-' + Math.min(slashIndex, commandChoices.length - 1) : undefined}
           placeholder=${suggestion ? suggestion.text : readOnly ? '当前会话为只读模式' : stopped ? '先写下你的想法，启动会话后发送…' : '向 ' + (session?.tool === 'claude' ? 'Claude' : 'Codex') + ' 发送消息…'}
-          onInput=${event => { update({ draft: event.currentTarget.value }); setSlashOpen(/^\s*\/[^\s/]*$/.test(event.currentTarget.value)); setSlashIndex(0) }}
+          onInput=${event => { clearCommandConfirmation(); update({ draft: event.currentTarget.value }); setSlashOpen(/^\s*\/[^\s/]*$/.test(event.currentTarget.value)); setSlashIndex(0) }}
           onPaste=${event => { if (event.clipboardData?.files?.length) { event.preventDefault(); event.stopPropagation(); addFiles(event.clipboardData.files) } }}
           onKeyDown=${event => {
             event.stopPropagation()
@@ -1018,7 +1069,7 @@ function SessionChat({ sessionId }) {
               if (commandChoices.length && ['ArrowDown', 'ArrowUp', 'Tab', 'Enter'].includes(event.key) && !event.shiftKey) {
                 event.preventDefault()
                 if (event.key === 'ArrowDown' || event.key === 'ArrowUp') setSlashIndex((Math.min(slashIndex, commandChoices.length - 1) + (event.key === 'ArrowDown' ? 1 : commandChoices.length - 1)) % commandChoices.length)
-                else chooseCommand(commandChoices[Math.min(slashIndex, commandChoices.length - 1)])
+                else chooseCommand(commandChoices[Math.min(slashIndex, commandChoices.length - 1)], event.key === 'Tab')
                 return
               }
             }

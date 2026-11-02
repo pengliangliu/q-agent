@@ -152,7 +152,7 @@ async function runCommand(record, row, api) {
     checkSession(current);
     if (!['waiting', 'idle'].includes(current.status) || !nativeComposer(row.tool, await pane(current, api), record.command)) throw new Error('原生输入内容未通过核对，命令尚未提交，请在独立终端检查。');
     record.state = 'unknown'; await save(record);
-    const entered = await cli(api, row, ['session', 'send-keys', row.id, '--enter', '--primary', '--json']);
+    const entered = await cli(api, row, ['session', 'send-keys', row.id, '--named-key', 'Enter', '--primary', '--json']);
     if (!entered.success) throw new Error('命令提交结果未知，请核对当前原生界面。');
     await pause();
     record.state = 'done'; record.message = '已提交原生命令，执行进度会继续显示在当前会话。';
@@ -192,7 +192,7 @@ async function respondToCommand(record, body, api) {
       if (!actual || actual.id !== prompt.id || actual._cursor !== prompt._cursor) throw new Error('原生菜单已变化，操作已停止。');
       touched = true;
       const result = await cli(api, current, ['session', 'send-keys', current.id,
-        ...(key === 'Enter' ? ['--enter'] : ['--named-key', key]), '--primary', '--json']);
+        '--named-key', key, '--primary', '--json']);
       if (!result.success) throw new Error('按键送达结果未知，请查看当前界面。');
       await pause();
     };

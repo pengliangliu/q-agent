@@ -184,7 +184,7 @@ export function modelComposer(tool, content, expected = null) {
     // without SGR dim. Normalize only that exact hint, never an operator draft.
     const lines = String(content || '').split('\n');
     const index = lines.findLastIndex(line => /^\s*❯\s*\/model\s+\[model\]\s*$/.test(clean(line)));
-    if (index >= 0) lines[index] = lines[index].replace(/\x1b\[38;5;246m\[model\](?=\x1b\[(?:39|0)m)/, '\x1b[2m[model]\x1b[22m');
+    if (index >= 0) lines[index] = lines[index].replace(/\x1b\[38;5;246m(?:\x1b\[49m)*\[model\](?=\x1b\[(?:39|0)m)/, '\x1b[2m[model]\x1b[22m');
     content = lines.join('\n');
   }
   return !modelMenu(tool, content) && nativeComposer(tool, content, expected);
@@ -201,8 +201,14 @@ export function modelMenu(tool, content) {
   if (footer < 0 || section.slice(footer + 1).some(line => /^\s*[›❯](?:\s|$)/.test(line))) return null;
   const rows = section.slice(1, footer).flatMap(line => {
     const match = line.match(/^\s*([❯›↑↓]\s*)?(\d+)\.\s+(.+?)\s{2,}(.+?)\s*$/);
-    return match ? [{ number: Number(match[2]), label: match[3].replace(/\s*✔/g, '').replace(/\s*\((?:current|default)\)/g, '').trim(),
-      selected: /^[❯›]/.test(match[1] || '') }] : [];
+    if (!match) return [];
+    let label = match[3].replace(/\s*✔/g, '').replace(/\s*\((?:current|default)\)/g, '').trim();
+    // Some native catalogs abbreviate the row to "Opus" and put its exact
+    // version first in the description. Require that same family and version.
+    const version = tool === 'claude' && /^(?:Opus|Sonnet|Haiku|Fable)$/.test(label)
+      ? match[4].match(new RegExp('^' + label + ' \\d+(?:\\.\\d+)?(?=\\s|$)'))?.[0] : null;
+    if (version) label = version;
+    return [{ number: Number(match[2]), label, selected: /^[❯›]/.test(match[1] || '') }];
   });
   if (!rows.length || rows.filter(row => row.selected).length !== 1) return null;
   const effort = section.join('\n').match(/\b(Low|Medium|High|xHigh|Max) effort(?: \(default\))? ←\/→ to adjust/i)?.[1]?.toLowerCase() || '';
@@ -289,7 +295,7 @@ export async function applyNativeModel(tool, target, io) {
   await io.pause(); raw = await io.read();
   if (!modelComposer(tool, raw, '/model')) throw new Error('原生模型命令尚未通过核对，未发送 Enter。');
   await io.stage?.('menu');
-  await io.send(['--enter']);
+  await io.send(['--named-key', 'Enter']);
   let menu;
   for (let attempt = 0; attempt < 5; attempt++) {
     await io.pause(); raw = await io.read(); menu = modelMenu(tool, raw);
@@ -301,7 +307,10 @@ export async function applyNativeModel(tool, target, io) {
     const before = modelMenu(tool, await io.read());
     if (!before || menuState(before) !== menuState(menu)) throw new Error('原生菜单已被其他操作改变，操作已停止。');
     await io.send(args); await io.pause(); raw = await io.read();
-    const after = modelMenu(tool, raw);
+    let after = modelMenu(tool, raw);
+    for (let attempt = 0; !after && !modelComposer(tool, raw) && attempt < 3; attempt++) {
+      await io.pause(); raw = await io.read(); after = modelMenu(tool, raw);
+    }
     if (!changingStage && (!after || after.kind !== menu.kind || after.title !== menu.title)) throw new Error('原生菜单状态未通过核对。');
     menu = after;
   }
@@ -313,12 +322,16 @@ export async function applyNativeModel(tool, target, io) {
     }
     if (menu.selected.number !== number) throw new Error('原生菜单中没有目标选项。');
   }
-  // Start at the first model so a scrollable menu never invents hidden rows.
-  await move(1);
-  for (let steps = 0; normalized(menu.selected.label) !== normalized(target.label) && steps < 30; steps++) {
-    const previous = menu.selected.number;
-    await press(['--named-key', 'Down']);
-    if (menu.selected.number <= previous) throw new Error('原生菜单未提供所选模型。');
+  const visible = menu.rows.find(row => normalized(row.label) === normalized(target.label));
+  if (visible) await move(visible.number);
+  else {
+    // Start at the first model only when the target is outside the visible rows.
+    await move(1);
+    for (let steps = 0; normalized(menu.selected.label) !== normalized(target.label) && steps < 30; steps++) {
+      const previous = menu.selected.number;
+      await press(['--named-key', 'Down']);
+      if (menu.selected.number <= previous) throw new Error('原生菜单未提供所选模型。');
+    }
   }
   if (normalized(menu.selected.label) !== normalized(target.label)) throw new Error('原生菜单未提供所选模型。');
   if (tool === 'claude') {
@@ -333,14 +346,14 @@ export async function applyNativeModel(tool, target, io) {
     await io.stage?.('commit');
     await press(['--text', 's'], true);
   } else {
-    await press(['--enter'], true);
+    await press(['--named-key', 'Enter'], true);
     if (!menu || menu.kind !== 'effort' || !menu.title.endsWith(target.label)) throw new Error('未能确认目标模型的推理强度菜单。');
     const names = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' };
     let option = menu.rows.find(row => row.label === names[target.reasoningEffort]);
     if (!option && ['max', 'ultra'].includes(target.reasoningEffort)) {
       const more = menu.rows.find(row => row.label === 'More reasoning…');
       if (!more) throw new Error('原生模型没有提供所选高级强度。');
-      await move(more.number); await press(['--enter'], true);
+      await move(more.number); await press(['--named-key', 'Enter'], true);
       if (!menu || menu.kind !== 'advanced') throw new Error('高级强度菜单未通过核对。');
       option = menu.rows.find(row => row.label === names[target.reasoningEffort]);
     }

@@ -6,6 +6,8 @@ import { beginUiMutation } from './uiOperations.js'
 const effortLabels = { minimal: '最低', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最大', ultra: '极高' }
 const allowedModel = (tool, value) => typeof value === 'string' && (tool === 'claude' ? /^claude-/.test(value) : tool === 'codex' && /^gpt-/.test(value))
 const matches = (current, target) => current?.modelId === target.modelId && (!target.reasoningEffort || current.reasoningEffort === target.reasoningEffort)
+const unsubmittedFailure = data => data.requestStatus === 'failed' && data.requestActive !== true &&
+  (data.commitAttempted === false || data.keySent === false)
 
 async function modelRequest(path, body, signal) {
   const release = body === undefined ? null : beginUiMutation()
@@ -41,6 +43,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
   const refreshing = useRef(false)
   const refreshAgain = useRef(false)
   const refreshRevision = useRef(0)
+  const failedRequest = useRef(false)
   const panel = useRef(null)
 
   function savePending(value) {
@@ -82,7 +85,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
     refreshing.current = true
     const revision = refreshRevision.current
     const operation = pendingRef.current
-    if (!quiet) { setLoading(true); setError('') }
+    if (!quiet) { setLoading(true); if (!failedRequest.current) setError('') }
     try {
       const data = await modelRequest('/desktop/chat/models?' + new URLSearchParams({ sessionId,
         ...(operation ? { requestId: operation.requestId } : {}) }), undefined, signal)
@@ -91,10 +94,10 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
       if (operation && data.requestStatus === 'succeeded' && data.current?.verified === true && matches(data.current, operation)) {
         savePending(null); touched.current = false; setModelId(data.current.modelId); setEffort(data.current.reasoningEffort || '')
         setNotice('已切换当前会话的模型与强度。'); onApplied?.()
-      } else if (operation && (data.draftCleared === true || data.requestStatus === 'failed' && data.keySent === false)) {
+      } else if (operation && (data.draftCleared === true || unsubmittedFailure(data) && !data.canClearDraft)) {
         savePending(null); touched.current = false
         if (data.draftCleared) setNotice(data.message || '未提交的模型命令已清除，可以重新应用设置。')
-        else setError(data.message || '设置未提交，请重新选择。')
+        else { failedRequest.current = true; setError(data.message || '设置未提交，请重新选择。') }
       } else if (operation) {
         savePending({ ...operation, state: data.requestStatus === 'pending' || data.requestActive === true ? 'pending' : data.requestStatus === 'failed' ? 'failed' : 'unknown',
           requestActive: data.requestActive === true, canClearDraft: data.canClearDraft === true,
@@ -156,7 +159,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
 
   useEffect(() => {
     if (!pending || pending.state !== 'pending' || pending.requestActive === false || posting.current || loading) return
-    const timer = setTimeout(() => { if (!document.hidden) refresh() }, 2200)
+    const timer = setTimeout(() => { if (!document.hidden) refresh(undefined, true) }, 700)
     return () => clearTimeout(timer)
   }, [pending, loading])
 
@@ -211,7 +214,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
     if (!canApply || posting.current) return
     const operation = { requestId: crypto.randomUUID(), modelId, reasoningEffort: effort, state: 'pending', requestActive: true }
     refreshRevision.current++
-    savePending(operation); posting.current = true; onBusyChange?.(true); setError(''); setNotice('')
+    savePending(operation); posting.current = true; onBusyChange?.(true); failedRequest.current = false; setError(''); setNotice('')
     try {
       const data = await modelRequest('/desktop/chat/model', { sessionId, modelId, reasoningEffort: effort,
         requestId: operation.requestId, revision: state.revision })
@@ -220,9 +223,11 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
         refreshRevision.current++
         setState(previous => ({ ...previous, ...data, current: { ...data.current, verified: true } }))
         savePending(null); touched.current = false; setNotice('已切换当前会话的模型与强度。'); onApplied?.()
+      } else if (unsubmittedFailure(data) && !data.canClearDraft) {
+        acceptState(data); savePending(null); failedRequest.current = true; setError(data.message || '设置未提交，请重新选择。')
       } else {
         savePending({ ...operation, state: data.requestStatus === 'pending' || data.requestActive === true ? 'pending' : 'unknown',
-          requestActive: data.requestActive !== false, message: data.message || '' })
+          requestActive: data.requestActive === true, message: data.message || '' })
       }
     } catch (err) {
       if (err.data?.keySent === false && !err.data?.unknown) savePending(null)

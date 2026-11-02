@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
+import { slashCommandPolicy } from './slashCommandPolicy.js'
 
 if (!document.querySelector('link[href="/static/app/slashCommands.css"]')) {
   const style = document.createElement('link')
@@ -31,12 +32,9 @@ export function slashInsertText(command) {
   return command.insertText || command.name + ' '
 }
 
-function commandHint(command) {
-  if (command.action === 'model' || command.action === 'effort') return '打开设置'
-  if (command.interaction === 'menu' || command.interaction === 'dialog') return '原生菜单 · 继续选择'
-  if (command.kind === 'skill') return '技能'
-  if (command.kind === 'mcp') return 'MCP'
-  return '原生命令'
+function commandHint(command, tool) {
+  const policy = slashCommandPolicy(command, tool)
+  return { model: '打开设置', execute: '点击执行', confirm: '确认后执行', input: '填入并补充' }[policy.mode]
 }
 
 export function SlashCommandMenu({ tool, draft, commands = [], loading = false, error = '', open = false,
@@ -63,10 +61,10 @@ export function SlashCommandMenu({ tool, draft, commands = [], loading = false, 
         onMouseDown=${event => event.preventDefault()} onMouseEnter=${() => onActiveIndexChange?.(index)}
         onClick=${() => onChoose?.(command)}>
         <span class="chat-slash-name" translate="no">${command.name}</span>
-        <span class="chat-slash-kind">${commandHint(command)}</span>
+        <span class="chat-slash-kind">${commandHint(command, tool)}</span>
         ${command.description && html`<span class="chat-slash-description" title=${command.description}>${command.description}</span>`}
       </button>`)}
     </div>`}
-    <div class="chat-slash-footer">↑↓ 选择 · Tab / Enter 填入 · Esc 关闭</div>
+    <div class="chat-slash-footer">↑↓ 选择 · 点击 / Enter 执行或展开 · Tab 填入 · Esc 关闭</div>
   </section>`
 }

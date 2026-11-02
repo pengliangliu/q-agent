@@ -282,7 +282,7 @@ export async function answerClaudePrompt(original, answer, io) {
   }
   try {
     if (answer.cancel) {
-      if (original.type === 'review') { await move(1); return result(await press(['--enter'], true)); }
+      if (original.type === 'review') { await move(1); return result(await press(['--named-key', 'Enter'], true)); }
       return result(await press(['--named-key', 'Escape'], true));
     }
     if (original.type === 'question' && original.multiple) {
@@ -305,7 +305,7 @@ export async function answerClaudePrompt(original, answer, io) {
       }
       await move(original.options.length); // The native Next row, never the adjacent Chat action.
     } else await move(answer.target);
-    return result(await press(['--enter'], true));
+    return result(await press(['--named-key', 'Enter'], true));
   } catch (error) {
     error.keySent = sent;
     error.finalKeyAttempted = finalKeyAttempted;
