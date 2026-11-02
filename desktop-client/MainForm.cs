@@ -9,6 +9,7 @@ using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -30,6 +31,8 @@ namespace QAgent
         private readonly bool main;
         private CoreWebView2Environment environment;
         private Task initialization;
+        private Task reconnection;
+        private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
         private bool closing;
         private bool documentReady;
         private bool listenerReady;
@@ -62,9 +65,7 @@ namespace QAgent
             retry = new Button { Text = "重试", Dock = DockStyle.Bottom, Height = 42, Visible = false };
             retry.Click += async delegate
             {
-                retry.Visible = false; statusLabel.Text = "正在重新连接…";
-                if (web.CoreWebView2 == null) { initialization = null; await InitializeAsync(); }
-                else web.CoreWebView2.Navigate((initialUri ?? new Uri(AppUrl)).AbsoluteUri);
+                await ReconnectAsync();
             };
             statusPanel.Controls.Add(statusLabel); statusPanel.Controls.Add(retry);
             Controls.Add(statusPanel); statusPanel.BringToFront();
@@ -81,6 +82,9 @@ namespace QAgent
         {
             try
             {
+                if (main) await Program.Backend.EnsureAsync(ReportBackendProgress, lifetime.Token);
+                if (closing) return;
+                statusLabel.Text = "后台已就绪，正在打开聊天界面…";
                 runtimeVersion = CoreWebView2Environment.GetAvailableBrowserVersionString();
                 if (environment == null) environment = await CoreWebView2Environment.CreateAsync(null, Program.UserDataFolder);
                 if (closing) return;
@@ -115,7 +119,53 @@ namespace QAgent
                 ApplyMemoryTarget();
                 if (initialUri != null) core.Navigate(initialUri.AbsoluteUri);
             }
-            catch (Exception error) { if (!closing) ShowError("无法打开本地界面，请确认本地服务与 WebView2 运行时可用后重试。", error.Message); }
+            catch (OperationCanceledException) { }
+            catch (Exception error) { if (!closing) ShowError("启动未完成：" + error.Message + "\n点击重试可重新启动并连接后台。", error.GetType().Name); }
+        }
+
+        private void ReportBackendProgress(string message)
+        {
+            if (closing || IsDisposed || !IsHandleCreated) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action<string>(ReportBackendProgress), message); }
+                catch (InvalidOperationException) { }
+                return;
+            }
+            statusLabel.Text = message;
+        }
+
+        private Task ReconnectAsync()
+        {
+            if (reconnection == null || reconnection.IsCompleted) reconnection = ReconnectCoreAsync();
+            return reconnection;
+        }
+
+        private async Task ReconnectCoreAsync()
+        {
+            if (closing) return;
+            bool reload = !documentReady;
+            if (reload) { statusPanel.Visible = true; statusPanel.BringToFront(); }
+            retry.Visible = false;
+            try
+            {
+                if (web.CoreWebView2 == null)
+                {
+                    if (initialization == null || initialization.IsCompleted) initialization = null;
+                    await InitializeAsync();
+                }
+                else
+                {
+                    await Program.Backend.EnsureAsync(ReportBackendProgress, lifetime.Token);
+                    if (!closing)
+                    {
+                        if (reload) web.CoreWebView2.Navigate((initialUri ?? new Uri(AppUrl)).AbsoluteUri);
+                        else { statusPanel.Visible = false; web.Visible = true; }
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception error) { if (!closing) ShowError("后台连接未恢复：" + error.Message, error.GetType().Name); }
         }
 
         internal static bool InternalUrl(string text)
@@ -144,7 +194,7 @@ namespace QAgent
             if (closing) return;
             if (!args.IsSuccess || args.HttpStatusCode >= 400)
             {
-                ShowError("本地界面尚未就绪。请通过桌面的 Q-agent 入口启动服务后重试。", args.WebErrorStatus.ToString());
+                ShowError("本地界面尚未就绪。点击重试，客户端会自动启动并连接后台。", args.WebErrorStatus.ToString());
                 return;
             }
             if (!InternalUrl(web.CoreWebView2.Source)) return;
@@ -240,11 +290,12 @@ namespace QAgent
                 status = status, setting = setting, message = message }));
         }
 
-        internal void FocusWindow()
+        internal async void FocusWindow()
         {
             if (closing || IsDisposed) return;
             Show(); if (WindowState == FormWindowState.Minimized) WindowState = previousState;
             BringToFront(); Activate(); SetForegroundWindow(Handle); ApplyMemoryTarget();
+            if (main && initialization != null && initialization.IsCompleted) await ReconnectAsync();
         }
         internal void FocusSession(string sessionId)
         {
@@ -312,7 +363,7 @@ namespace QAgent
             catch { /* Diagnostics never affect the user's session. */ }
         }
 
-        protected override void OnFormClosing(FormClosingEventArgs args) { closing = true; base.OnFormClosing(args); }
+        protected override void OnFormClosing(FormClosingEventArgs args) { closing = true; lifetime.Cancel(); base.OnFormClosing(args); }
         protected override void OnFormClosed(FormClosedEventArgs args)
         {
             WriteState("closed", "");

@@ -15,6 +15,7 @@ namespace QAgent
         internal static readonly string UserDataFolder = Path.Combine(DataFolder, "WebView2");
         internal static MainForm MainWindow;
         internal static NativeNotifications Notifications;
+        internal static BackendStartup Backend;
 
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
@@ -42,6 +43,7 @@ namespace QAgent
                         Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(AppId));
                         Application.EnableVisualStyles();
                         Application.SetCompatibleTextRenderingDefault(false);
+                        Backend = new BackendStartup();
                         MainWindow = new MainForm(null, new Uri(MainForm.AppUrl), true);
                         Notifications = new NativeNotifications(delegate(string sessionId) { MainWindow.FocusSession(sessionId); });
                         wait = ThreadPool.RegisterWaitForSingleObject(activation, delegate(object state, bool timedOut)
@@ -62,6 +64,7 @@ namespace QAgent
                     {
                         if (wait != null) wait.Unregister(null);
                         if (Notifications != null) Notifications.Dispose();
+                        if (Backend != null) Backend.Dispose();
                         instance.ReleaseMutex();
                     }
                 }
