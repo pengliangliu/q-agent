@@ -6,8 +6,7 @@ import { beginUiMutation } from './uiOperations.js'
 const effortLabels = { minimal: '最低', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最大', ultra: '极高' }
 const allowedModel = (tool, value) => typeof value === 'string' && (tool === 'claude' ? /^claude-/.test(value) : tool === 'codex' && /^gpt-/.test(value))
 const matches = (current, target) => current?.modelId === target.modelId && (!target.reasoningEffort || current.reasoningEffort === target.reasoningEffort)
-const unsubmittedFailure = data => data.requestStatus === 'failed' && data.requestActive !== true &&
-  (data.commitAttempted === false || data.keySent === false)
+const confirmedFailure = data => data?.requestStatus === 'failed' && data.requestActive === false
 
 async function modelRequest(path, body, signal) {
   const release = body === undefined ? null : beginUiMutation()
@@ -45,6 +44,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
   const refreshRevision = useRef(0)
   const failedRequest = useRef(false)
   const panel = useRef(null)
+  const failedPending = pending?.state === 'failed' && pending.requestActive === false
 
   function savePending(value) {
     pendingRef.current = value
@@ -53,6 +53,16 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
       if (value) localStorage.setItem('agentdeck.model.' + sessionId, JSON.stringify(value))
       else localStorage.removeItem('agentdeck.model.' + sessionId)
     } catch (_) {}
+  }
+
+  function finishFailure(operation, data, message = data?.message) {
+    savePending(data?.canClearDraft ? { ...operation, state: 'failed', requestActive: false,
+      canClearDraft: true, message } : null)
+    if (alive.current) {
+      if (!touched.current) { setModelId(operation.modelId); setEffort(operation.reasoningEffort || '') }
+      setNotice(''); setError(message || '设置未完成，可以重新选择模型与强度。')
+    }
+    failedRequest.current = true; touched.current = true
   }
 
   function acceptState(data) {
@@ -94,20 +104,22 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
       if (operation && data.requestStatus === 'succeeded' && data.current?.verified === true && matches(data.current, operation)) {
         savePending(null); touched.current = false; setModelId(data.current.modelId); setEffort(data.current.reasoningEffort || '')
         setNotice('已切换当前会话的模型与强度。'); onApplied?.()
-      } else if (operation && (data.draftCleared === true || unsubmittedFailure(data) && !data.canClearDraft)) {
+      } else if (operation && data.draftCleared === true) {
         savePending(null); touched.current = false
-        if (data.draftCleared) setNotice(data.message || '未提交的模型命令已清除，可以重新应用设置。')
-        else { failedRequest.current = true; setError(data.message || '设置未提交，请重新选择。') }
+        setNotice(data.message || '未提交的模型命令已清除，可以重新应用设置。')
+      } else if (operation && confirmedFailure(data)) {
+        finishFailure(operation, data)
       } else if (operation) {
-        savePending({ ...operation, state: data.requestStatus === 'pending' || data.requestActive === true ? 'pending' : data.requestStatus === 'failed' ? 'failed' : 'unknown',
-          requestActive: data.requestActive === true, canClearDraft: data.canClearDraft === true,
+        savePending({ ...operation, state: data.requestStatus === 'pending' || data.requestActive === true ? 'pending' : 'unknown',
+          requestActive: typeof data.requestActive === 'boolean' ? data.requestActive : null, canClearDraft: data.canClearDraft === true,
           message: data.message || (data.requestStatus === 'pending' ? '' : '切换结果尚未确认，请刷新核对当前状态。') })
       }
     } catch (err) {
       if (err.name !== 'AbortError' && alive.current && revision === refreshRevision.current) {
         if (operation && pendingRef.current?.requestId === operation.requestId) {
           const requestActive = err.data?.requestId === operation.requestId ? err.data.requestActive : null
-          savePending({ ...operation, state: requestActive === true ? 'pending' : 'unknown',
+          if (err.data?.requestId === operation.requestId && confirmedFailure(err.data)) finishFailure(operation, err.data, err.message)
+          else savePending({ ...operation, state: requestActive === true ? 'pending' : 'unknown',
             requestActive: typeof requestActive === 'boolean' ? requestActive : null, canClearDraft: false,
             message: err.message || '暂时无法读取原切换结果，请刷新核对。' })
         }
@@ -134,7 +146,10 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
         else localStorage.removeItem('agentdeck.model.' + sessionId)
       } catch (_) { event.preventDefault() }
     }
-    const timer = setInterval(() => { if (!pendingRef.current) syncVisible() }, 15000)
+    const timer = setInterval(() => {
+      const operation = pendingRef.current
+      if (!operation || operation.state === 'failed' && operation.requestActive === false) syncVisible()
+    }, 15000)
     window.addEventListener('focus', syncVisible)
     window.addEventListener('agentdeck:before-ui-reload', flush)
     document.addEventListener('visibilitychange', syncVisible)
@@ -175,7 +190,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
   const strength = current?.reasoningEffort ? '强度：' + effortText(current.reasoningEffort) : current ? '无强度档位' :
     evidence?.scope === 'current-turn' ? '本轮：' + effortText(evidence.reasoningEffort) :
     evidence ? '最近请求：' + effortText(evidence.reasoningEffort) : '强度未确认'
-  const canApply = !disabled && !loading && !pending && state?.canChange === true && selected && validEffort &&
+  const canApply = !disabled && !loading && (!pending || failedPending) && !pending?.canClearDraft && state?.canChange === true && selected && validEffort &&
     (current?.modelId !== modelId || current?.reasoningEffort !== effort)
 
   function stopWaiting() {
@@ -223,14 +238,15 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
         refreshRevision.current++
         setState(previous => ({ ...previous, ...data, current: { ...data.current, verified: true } }))
         savePending(null); touched.current = false; setNotice('已切换当前会话的模型与强度。'); onApplied?.()
-      } else if (unsubmittedFailure(data) && !data.canClearDraft) {
-        acceptState(data); savePending(null); failedRequest.current = true; setError(data.message || '设置未提交，请重新选择。')
+      } else if (confirmedFailure(data)) {
+        acceptState(data); finishFailure(operation, data)
       } else {
         savePending({ ...operation, state: data.requestStatus === 'pending' || data.requestActive === true ? 'pending' : 'unknown',
-          requestActive: data.requestActive === true, message: data.message || '' })
+          requestActive: typeof data.requestActive === 'boolean' ? data.requestActive : null, message: data.message || '' })
       }
     } catch (err) {
-      if (err.data?.keySent === false && !err.data?.unknown) savePending(null)
+      if ((confirmedFailure(err.data) && err.data.requestId === operation.requestId) ||
+          (err.data?.keySent === false && !err.data?.unknown && (!err.data.requestId || err.data.requestId === operation.requestId))) finishFailure(operation, err.data, err.message)
       else savePending({ ...operation, state: 'unknown', requestActive: null, message: err.message || '设置结果待确认。' })
       if (alive.current) setError(err.message || '设置结果待确认。')
     } finally {
@@ -241,7 +257,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
 
   return html`<div class="chat-model-controls" onKeyDown=${event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); setOpen(false) } }} onKeyUp=${event => event.stopPropagation()}>
     <button type="button" class="chat-model-toggle" aria-label="选择模型与强度" aria-expanded=${open} title=${(currentModelId || '当前模型未确认') + ' · ' + strength + '；点击设置'}
-      onClick=${() => { if (!open) { touched.current = false; setNotice(''); refresh() }; setOpen(value => !value) }}>
+      onClick=${() => { if (!open) { if (!failedRequest.current) touched.current = false; setNotice(''); refresh() }; setOpen(value => !value) }}>
       <span style=${{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px' }}>
         <span translate="no">${currentModelId || (tool === 'claude' ? 'Claude' : 'Codex') + ' · 模型未确认'}</span><small>${strength}</small>
       </span><span aria-hidden="true">⌄</span>
@@ -249,21 +265,21 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
     ${open && html`<form class="chat-model-popover" ref=${panel} onSubmit=${apply} aria-label="当前会话模型设置">
       <header><strong>当前会话模型</strong><button type="button" aria-label="关闭模型设置" onClick=${() => setOpen(false)}>×</button></header>
       <p class="chat-model-current">${currentModelId || '当前模型尚未确认'} · ${strength}</p>
-      <label><span>模型</span><select name="modelId" value=${modelId} disabled=${loading || Boolean(pending) || disabled}
+      <label><span>模型</span><select name="modelId" value=${modelId} disabled=${loading || Boolean(pending && !failedPending) || disabled}
         onChange=${event => { const value = event.currentTarget.value; touched.current = true; setModelId(value)
           if (!(models.find(model => model.value === value)?.reasoningEfforts || []).includes(effort)) setEffort('') }}>
         <option value="" disabled>请选择模型</option>${models.map(model => html`<option key=${model.value} value=${model.value}>${model.label || model.value}</option>`)}
       </select></label>
-      ${efforts.length > 0 && html`<label><span>推理强度</span><select name="reasoningEffort" value=${validEffort ? effort : ''} disabled=${loading || Boolean(pending) || disabled}
+      ${efforts.length > 0 && html`<label><span>推理强度</span><select name="reasoningEffort" value=${validEffort ? effort : ''} disabled=${loading || Boolean(pending && !failedPending) || disabled}
         onChange=${event => { touched.current = true; setEffort(event.currentTarget.value) }}><option value="" disabled>请选择强度</option>
         ${efforts.map(value => html`<option key=${value} value=${value}>${effortText(value)}</option>`)}</select></label>`}
       ${loading && html`<p role="status">正在核对当前模型…</p>`}
       ${(disabled || state?.canChange === false) && html`<p>${state?.reason || '当前会话处理完成后可切换模型。'}</p>`}
-      ${pending && html`<p role="status">${pending.message || (pending.state === 'pending' ? '正在应用设置，等待原生会话确认…' : '切换结果尚未确认，请刷新核对当前状态。')}</p>`}
+      ${pending && !failedPending && html`<p role="status">${pending.message || (pending.state === 'pending' ? '正在应用设置，等待原生会话确认…' : '切换结果尚未确认，请刷新核对当前状态。')}</p>`}
       ${(error || notice) && html`<p role=${error ? 'alert' : 'status'}>${error || notice}</p>`}
       <footer><button type="button" disabled=${loading} onClick=${() => refresh()}>刷新状态</button>
         ${pending?.canClearDraft && html`<button type="button" disabled=${disabled || loading || posting.current || pending.requestActive === true} onClick=${clearDraft}>清除未提交命令</button>`}
-        ${pending && !pending.canClearDraft && pending.state !== 'pending' && pending.requestActive !== true && html`<button type="button" disabled=${posting.current} onClick=${stopWaiting}>停止等待</button>`}
+        ${pending && !failedPending && !pending.canClearDraft && pending.state !== 'pending' && pending.requestActive !== true && html`<button type="button" disabled=${posting.current} onClick=${stopWaiting}>停止等待</button>`}
         <button type="submit" class="chat-model-apply" disabled=${!canApply}>应用到当前会话</button></footer>
     </form>`}
   </div>`
