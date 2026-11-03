@@ -67,7 +67,7 @@ export function AccountSettings({ en }) {
     <button type="button" aria-expanded=${open} onClick=${() => { setManual(null); setOpen(!open); setNotice('') }}>
       ${t('账号管理', 'Account management')} ${open ? '▴' : '▾'}
     </button>
-    ${open && html`<p>${t('“登录 / 切换账号”打开 WSL 原生窗口。“手动网页登录”在这里显示授权网址和下一步操作。', 'Sign in / switch opens the native WSL terminal. Manual web sign-in shows the authorization link and next step here.')}</p>
+    ${open && html`<p>${t('在这里选择要登录或查看的账号。要让已有会话使用另一个账号，请在该聊天右上角点「账号」。', 'Choose an account here to sign in or check its login. To switch an existing chat, use Account in its header.')}</p>
       ${accounts.map(row => {
         const slot = row.slots.find(s => s.name === selected[row.tool])
         const signedIn = slot ? slot.loggedIn : row.loggedIn

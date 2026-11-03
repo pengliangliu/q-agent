@@ -539,6 +539,12 @@ function SessionChat({ sessionId }) {
         update({ pending: null, ...clearSubmittedDraft(pending) })
         if (receipt.observedInHistory === true && receipt.status !== 'landed' && alive.current) setNotice('已在会话记录中看到此消息；投递回执未完整确认。')
         refreshRef.current?.()
+      } else if (receipt.settled === true && receipt.requestActive === false &&
+                 ['typed','submitted'].includes(receipt.status) && receipt.sendId &&
+                 receipt.clientId === pending.clientId && (!pending.sendId || receipt.sendId === pending.sendId)) {
+        update({ pending: null, recoveryRecords: [...store.recoveryRecords,
+          { ...store.pending, ...receipt, kind: 'send', trackingStopped: true }] })
+        refreshRef.current?.()
       } else {
         const retryDelivery = deliveryRevision === (store.pending.deliverNowRevision || 0) && receipt.deliverNowState === 'refused' &&
           receipt.keySent === false && receipt.retryAllowed === true && !receipt.unknown
@@ -960,9 +966,13 @@ function SessionChat({ sessionId }) {
       <div class="chat-title-line"><strong translate="no">${session?.title || '当前会话'}</strong><span class=${'chat-state ' + (requestIssue ? 'issue-' + requestIssue.state : running ? 'active' : '')}><i />${statusText}</span></div></div>
       <div class="chat-header-actions"><${ChatQuota} key=${'quota:' + sessionId} sessionId=${sessionId} tool=${session?.tool} />
         ${['claude','codex'].includes(session?.tool) && html`<${SessionAccount} key=${'account:' + sessionId + ':' + session.tool} sessionId=${sessionId}
-          tool=${session.tool} observedAccount=${store.history.account} onBusyChange=${setAccountBusy}
-          disabled=${readOnly || running || starting || requiresAction || modelBusy || store.sending || store.responding || !!store.pending || !!commandPending}
-          onSwitch=${() => { refreshRef.current?.(); setModelOpenRequest({key:crypto.randomUUID(),refreshOnly:true}) }}/>`}
+          tool=${session.tool} observedAccount=${store.history.account} running=${running} onBusyChange=${setAccountBusy}
+          disabled=${readOnly || (running && session.tool !== 'codex') || starting || requiresAction || modelBusy || store.sending || store.responding || !!store.pending || !!commandPending}
+          onSwitch=${result => {
+            if (result.continuation && !store.pending) update({pending:{...result.continuation,text:'继续',paths:[],submittedAt:new Date().toISOString()}})
+            if (result.continuationUnconfirmed) setNotice('账号已切换，接续投递尚未确认，请查看对话和原回执。')
+            refreshRef.current?.(); setModelOpenRequest({key:crypto.randomUUID(),refreshOnly:true})
+          }}/>`}
         <${SessionModelControls} key=${sessionId + ':' + session?.tool} sessionId=${sessionId} tool=${session?.tool}
         disabled=${readOnly || stopped || running || starting || requiresAction || accountBusy || Boolean(store.pending) || Boolean(commandPending)}
         openRequest=${modelOpenRequest} onBusyChange=${value => { modelBusyRef.current = value; setModelBusy(value) }} onApplied=${() => refreshRef.current?.()} />
@@ -986,7 +996,8 @@ function SessionChat({ sessionId }) {
       ${store.loaded && store.messages.length === 0 && html`<div class="chat-empty"><span class="chat-empty-mark">✳</span><h2>${startFailed ? '会话启动失败' : stopped ? '继续你的工作' : '从这里开始'}</h2><p>${startFailed ? '进程启动后提前退出，请重试或打开高级控制检查。' : stopped ? '启动会话后，输入需求或添加文件。' : '描述要完成的事，也可以拖入图片和文件。'}</p></div>`}
       ${store.messages.filter(message => ['user', 'assistant', 'tool'].includes(message.role)).map(message => html`<${Message} key=${message.id} message=${message} sessionId=${sessionId} tool=${session?.tool} reveal=${reveal} projectPath=${session?.path} />`)}
       ${store.recoveryRecords.map(record => html`<section class="chat-pending chat-recovery" key=${record.clientId || record.requestId}>
-        <strong>已停止本地跟踪，原请求保留</strong><p translate="no">${record.text || record.command || record.attachments?.map(file => file.name).join('、')}</p>
+        <strong>${record.settled && ['typed','submitted'].includes(record.status) && !record.observedInHistory
+          ? '投递跟踪已结束，送达未确认' : '已停止本地跟踪，原请求保留'}</strong><p translate="no">${record.text || record.command || record.attachments?.map(file => file.name).join('、')}</p>
         <small>${record.receiptError || record.reason || record.message || ''}</small>
         ${['landed', 'done'].includes(record.status || record.state) && html`<p>原请求已完成</p>`}
         <button type="button" onClick=${() => queryRecovery(record)}>查询原请求</button>

@@ -117,6 +117,11 @@ function emptyComposer(row, pane) {
   return nativeComposer(row.tool, raw) && !/queued|to send now|ctrl\+x.*ctrl\+s/i.test(cleanPane(pane).split('\n').slice(-20).join('\n'));
 }
 
+export function interruptibleCodex(row, pane) {
+  return row.tool === 'codex' && (row.status === 'running' || row.hook_status_fresh && row.hook_status === 'running') &&
+    noInteractiveMenu(row,pane) && /esc to interrupt/i.test(cleanPane(pane).split('\n').slice(-60).join('\n')) && emptyComposer(row,pane);
+}
+
 export function deliveryCapability(data, row, pane, options = {}) {
   const denied = reason => ({ canDeliverNow: false, deliverNowReason: reason, deliverNowWillInterrupt: false });
   if (data.send_id !== options.sendId || data.session_id !== row.id || (data.tool && data.tool !== row.tool)) return denied('原消息与当前会话不一致。');
@@ -126,6 +131,7 @@ export function deliveryCapability(data, row, pane, options = {}) {
   if (data.claude_session_id && data.claude_session_id !== row.claude_session_id) return denied('原消息属于另一个 Claude 对话。');
   if (!noInteractiveMenu(row, pane)) return denied('原生会话正在等待确认，请先处理当前确认。');
   if (data.state === 'landed') return denied('原消息已经进入对话。');
+  if (data.settled === true) return denied('原回执已结束，送达结果未确认。');
   if (data.state === 'typing') return denied('原队列正在投递这条消息，请等待原回执更新。');
   if (['failed', 'cancelled'].includes(data.state)) return denied('原消息已结束，不能重新释放该回执。');
   const busy = row.status === 'running' && /esc to interrupt/i.test(cleanPane(pane).split('\n').slice(-70).join('\n'));

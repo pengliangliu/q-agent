@@ -447,9 +447,13 @@ async function saveReceipt(file, record) {
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
-async function send(body, api) {
+export async function send(body, api, expected = null) {
   const row = await cachedSession(body.sessionId, api, true);
   supported(row);
+  if (expected && (row.tool !== 'codex' || row.ssh_host || row.account !== expected.account ||
+      row.codex_session_id !== expected.codex_session_id || row.tmux_session !== expected.tmux_session)) {
+    throw new Error('目标账号或对话已变化，接续消息未提交。');
+  }
   if (!identifier(body.clientId)) throw new Error('发送标识无效，请刷新页面。');
   if (typeof body.text !== 'string' || Buffer.byteLength(body.text) > 48000) throw new Error('消息最大 48 KB。');
   const paths = await attachmentPaths(body.paths || [], row, api);

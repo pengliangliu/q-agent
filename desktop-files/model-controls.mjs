@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { acquireNativeControl, nativeComposer, sendVerifiedMenuKey } from './native-controls.mjs';
+import { acquireNativeControl, hasPendingSend, nativeComposer, sendVerifiedMenuKey } from './native-controls.mjs';
 
 const receipts = path.join(os.homedir(), '.local/share/agent-deck/chat-receipts/models');
 const active = new Map();
@@ -246,12 +246,12 @@ export function modelMenu(tool, content) {
     sessionOnly: tool === 'claude' || /s session/.test(section[footer]) };
 }
 
-function ready(row, raw) {
+function ready(row, raw, queueBusy) {
   return !row.ssh_host && ['claude', 'codex'].includes(row.tool) &&
     !['stopped', 'error', 'starting'].includes(row.status) &&
     (row.status === 'waiting' || row.substate === 'background-work') &&
     !(row.hook_status_fresh && row.hook_status === 'running') &&
-    !(row.queue || []).some(item => ['queued', 'typing', 'typed', 'submitted'].includes(item.state)) && modelComposer(row.tool, raw);
+    !queueBusy && modelComposer(row.tool, raw);
 }
 async function snapshot(id, api, refresh = false) {
   if (!identifier(id)) throw new Error('会话标识无效。');
@@ -263,12 +263,13 @@ async function snapshot(id, api, refresh = false) {
   const sessionCurrent = await nativeSessionCurrent(row, models, api).catch(() => null);
   const current = sessionCurrent && (!screenCurrent.modelId || screenCurrent.modelId === sessionCurrent.modelId) ? sessionCurrent : screenCurrent;
   const effortEvidence = await claudeEffortEvidence(row, current.modelId).catch(() => null);
-  const canChange = models.length > 0 && ready(row, raw);
-  return { row, raw, sessionId: id, tool: row.tool, models, catalogSource, current, effortEvidence, canChange,
+  const queueBusy = await hasPendingSend(row);
+  const canChange = models.length > 0 && ready(row, raw, queueBusy);
+  return { row, raw, queueBusy, sessionId: id, tool: row.tool, models, catalogSource, current, effortEvidence, canChange,
     reason: canChange ? '' : models.length ? '会话空闲且原生输入框为空时可以切换模型。' : '当前可用模型目录尚未读取，请刷新后再试。',
     revision: hash([identity(row), current.modelId, current.reasoningEffort, current.verified, canChange]) };
 }
-function visibleSnapshot({ row, raw, ...visible }) { return visible; }
+function visibleSnapshot({ row, raw, queueBusy, ...visible }) { return visible; }
 async function save(record) {
   const file = filename(record.sessionId, record.requestId), temporary = file + '.' + crypto.randomUUID() + '.tmp';
   const handle = await fs.open(temporary, 'wx', 0o600);
@@ -288,7 +289,7 @@ function canClearDraft(record, state) {
   return beforeModelEnter(record) && !record.clearDraft && !isActive(record) && record.status !== 'succeeded' &&
     hash(identity(state.row)) === hash(record.identity) && state.row.status === 'waiting' &&
     !(state.row.hook_status_fresh && state.row.hook_status === 'running') &&
-    !(state.row.queue || []).some(item => ['queued', 'typing', 'typed', 'submitted'].includes(item.state)) &&
+    !state.queueBusy &&
     modelComposer(state.tool, state.raw, '/model');
 }
 function requestView(record, state) {

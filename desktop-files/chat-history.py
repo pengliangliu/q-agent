@@ -336,6 +336,9 @@ def page(request):
                 **({"requestIssue": None} if request.get("tool") == "claude" and not request.get("before") else {})}
     if not source.is_absolute() or not (source.name.endswith(".jsonl") or source.name.endswith(".jsonl.zst")):
         raise ValueError("不支持此记录格式。")
+    turn_only = request.get("codexTurnOnly") is True
+    if turn_only and (request.get("tool") != "codex" or not source.name.endswith("-" + request["nativeId"] + ".jsonl")):
+        return {}
     original = source.resolve()
     source = uncompress(original) if source.suffix == ".zst" else original
     tag = hashlib.sha256(str(original).encode()).hexdigest()[:16]
@@ -382,12 +385,21 @@ def page(request):
                 if not line or offset > boundary:
                     continue
                 if len(line) > MAX_LINE:
+                    if turn_only:
+                        return {}
                     context_pending.clear()
                     continue
                 try:
                     record = json.loads(line)
+                    if turn_only:
+                        event = record.get("payload") or {}
+                        if record.get("type") == "event_msg" and event.get("type") in ("task_started", "turn_aborted", "task_complete"):
+                            return {"turnId": event.get("turn_id"), "state": event["type"], "reason": event.get("reason")}
+                        continue
                     normalized = messages(record) if len(found) <= PAGE or record.get("type") == "user" else []
                 except (ValueError, TypeError, AttributeError):
+                    if turn_only:
+                        return {}
                     context_pending.clear()
                     continue  # A writer may not have finished its final JSONL row yet.
                 if claude_context:
@@ -427,6 +439,8 @@ def page(request):
                     break
             position = start
             if len(carry) > MAX_LINE:
+                if turn_only:
+                    return {}
                 carry = b""
                 context_pending.clear()
                 notice = "个别超长记录未展开；原记录保持完整。"

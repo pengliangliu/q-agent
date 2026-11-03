@@ -1,4 +1,46 @@
 import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+// session show omits settled. Read the retained receipt without waking a send
+// worker. An unqualified session may come from the configured or inferred profile.
+export async function hasPendingSend(row) {
+  const queue = row.queue || [];
+  if (queue.some(item => ['queued','typing'].includes(item.state))) return true;
+  const watching = queue.filter(item => ['typed','submitted'].includes(item.state));
+  if (!watching.length) return false;
+  const xdg = process.env.XDG_DATA_HOME?.trim() || '';
+  const data = path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), '.local/share');
+  const roots = [path.join(data, 'agent-deck/profiles'), path.join(os.homedir(), '.agent-deck/profiles')];
+  try {
+    const dirs = [];
+    if (row.profile && (path.basename(row.profile) !== row.profile || ['.','..'].includes(row.profile))) return true;
+    for (const root of roots) {
+      if (row.profile) { dirs.push(path.join(root,row.profile,'sendqueue')); continue; }
+      const profiles = await fs.readdir(root,{withFileTypes:true}).catch(error => {
+        if (error.code === 'ENOENT') return []; throw error;
+      });
+      for (const profile of profiles) if (profile.isDirectory() || profile.isSymbolicLink()) dirs.push(path.join(root,profile.name,'sendqueue'));
+    }
+    for (const item of watching) {
+      if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(item.id) || !item.enqueued_at) return true;
+      let found = false;
+      for (const dir of dirs) {
+        const raw = await fs.readFile(path.join(dir,item.id+'.json'),'utf8').catch(error => {
+          if (error.code === 'ENOENT') return null; throw error;
+        });
+        if (raw === null) continue;
+        const rec = JSON.parse(raw);
+        if (rec.send_id !== item.id || rec.session_id !== row.id || rec.created_at !== item.enqueued_at ||
+            rec.state !== item.state || rec.settled !== true) return true;
+        found = true;
+      }
+      if (!found) return true;
+    }
+    return false;
+  } catch { return true; }
+}
 
 // All native menu/approval/model actions share one short-lived session lock.
 const active = new Set();
@@ -70,7 +112,7 @@ export function nativeComposer(tool, content, expected = null) {
   const raw = String(content || '').split('\n'), lines = raw.map(clean);
   const glyph = tool === 'claude' ? '❯' : '›';
   const index = lines.findLastIndex(line => new RegExp('^\\s*' + glyph + '(?:\\s|$)').test(line));
-  if (index < 0 || lines.slice(-70).some(line => /esc to interrupt|Queued follow-up inputs/i.test(line))) return false;
+  if (index < 0 || lines.slice(-70).some(line => /esc to interrupt|Queued follow-up inputs|^\s*ctrl\+x ctrl\+s to send now\s*$/i.test(line))) return false;
   const next = (lines[index + 1] || '').trim();
   if (tool === 'claude' ? !/^─{5,}/.test(next) : next !== '') return false;
   const value = lines[index].slice(lines[index].indexOf(glyph) + 1).trim();

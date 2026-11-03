@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { acquireNativeControl, nativeComposer } from './native-controls.mjs';
+import { acquireNativeControl, hasPendingSend, nativeComposer } from './native-controls.mjs';
 import { manualLogin } from './manual-login.mjs';
+import { send } from './chat-backend.mjs';
+import { interruptibleCodex } from './deliver-now-control.mjs';
 
 const helper = fileURLToPath(new URL('./account-login.py', import.meta.url));
 const tools = ['claude', 'codex'];
@@ -32,15 +34,70 @@ async function preview(api, row, slot) {
     throw error;
   }
 }
-function busy(row) {
+async function busy(row) {
   return !['waiting','idle','stopped'].includes(row.status) || row.hook_status_fresh && row.hook_status === 'running' ||
     /permission|approval|user-input|blocked/.test(row.substate || '') ||
-    row.queue?.some(item => ['queued','typing','typed','submitted'].includes(item.state));
+    hasPendingSend(row);
+}
+async function codexTurn(api,row) {
+  const { stdout } = await api.exec('/usr/bin/python3',[path.join(path.dirname(helper),'chat-history.py'),JSON.stringify({
+    codexTurnOnly:true, tool:'codex', path:row.transcript_path, nativeId:row.codex_session_id, codexHome:row.resolved_codex_home,
+  })],{timeout:8000});
+  return JSON.parse(stdout);
+}
+async function finishConfirmedTurn(api, initial, confirmation) {
+  const same = row => row.tool === 'codex' && !row.ssh_host && rowAccount(row) === rowAccount(initial) &&
+    row.codex_session_id === confirmation.nativeId && row.tmux_session === initial.tmux_session;
+  const current = await api.session(initial.id);
+  if (!same(current) || await hasPendingSend(current)) throw new Error('changed');
+  const pane = await native(api,[...prefix(current),'session','output',current.id,'--pane','--primary']);
+  let turn = await codexTurn(api,current);
+  if (turn.turnId !== confirmation.turnId) throw new Error('changed');
+  const interrupt = turn.state === 'task_started';
+  if (interrupt) {
+    if (!pane.success || !interruptibleCodex(current,pane.content)) throw new Error('unsafe composer');
+    const key = await native(api,[...prefix(current),'session','send-keys',current.id,'--named-key','Escape','--primary']);
+    if (!key.success) throw new Error('unconfirmed interrupt');
+  } else if (turn.state !== 'task_complete') throw new Error('changed');
+  const deadline = Date.now() + 15000;
+  do {
+    const row = await api.session(initial.id);
+    if (!same(row) || !['running','waiting','idle'].includes(row.status) || await hasPendingSend(row)) throw new Error('changed');
+    if (!await busy(row)) {
+      turn = await codexTurn(api,row);
+      if (turn.turnId !== confirmation.turnId) throw new Error('changed');
+      if (turn.state === 'task_complete') return false;
+      if (interrupt && turn.state === 'turn_aborted' && turn.reason === 'interrupted') return true;
+    }
+    await new Promise(resolve => setTimeout(resolve,300));
+  } while (Date.now() < deadline);
+  throw new Error('unconfirmed interrupt');
+}
+
+async function continueSwitchedTurn(api,actual,confirmation,targetHome) {
+  const deadline = Date.now() + 20000;
+  let row = actual;
+  do {
+    if (row.tool !== 'codex' || row.ssh_host || row.account !== actual.account ||
+        row.codex_session_id !== confirmation.nativeId || !targetHome || row.resolved_codex_home !== targetHome ||
+        ['stopped','error'].includes(row.status) || await hasPendingSend(row)) throw new Error('destination changed');
+    const turn = await codexTurn(api,row);
+    if (turn.turnId && turn.turnId !== confirmation.turnId) return; // Already advanced on the destination.
+    if (turn.turnId === confirmation.turnId && turn.state === 'turn_aborted' && turn.reason === 'interrupted' && !await busy(row)) {
+      const pane = await native(api,[...prefix(row),'session','output',row.id,'--pane','--primary']);
+      if (pane.success && nativeComposer('codex',pane.content)) {
+        return send({sessionId:row.id,clientId:'switch-continue-'+confirmation.turnId,text:'继续'},api,row);
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve,500));
+    row = await api.session(actual.id);
+  } while (Date.now() < deadline);
+  throw new Error('destination not ready');
 }
 export async function handleAccountSessions(req, res, url, api) {
   const route = url.pathname;
   const manual = /^\/desktop\/accounts\/manual\/(start|status|submit|cancel)$/.exec(route)?.[1];
-  const get = ['/desktop/accounts/slots','/desktop/accounts/current'].includes(route);
+  const get = ['/desktop/accounts/slots','/desktop/accounts/current','/desktop/accounts/switch-turn'].includes(route);
   if (!manual && !get && !['/desktop/accounts/add','/desktop/accounts/create-session','/desktop/accounts/switch'].includes(route)) return false;
   const reply = (code, data) => { api.reply(res,code,data); return true; };
   if (req.headers['x-agentdeck-desktop'] !== '1' || req.method !== (get ? 'GET' : 'POST')) return reply(403,{error:'请从本机账号管理界面操作。'});
@@ -94,6 +151,12 @@ export async function handleAccountSessions(req, res, url, api) {
     const row = await api.session(body.sessionId);
     if (row.tool !== tool || row.ssh_host) return reply(409,{error:'账号仅适用于此助手的本机原生会话。'});
     const account = rowAccount(row);
+    if (route.endsWith('/switch-turn')) {
+      if (tool !== 'codex' || !row.codex_session_id) return reply(409,{error:'无法核对当前 Codex 回合。'});
+      const turn = await codexTurn(api,row);
+      if (turn.state !== 'task_started' || !plain(turn.turnId,100) || !turn.turnId) return reply(409,{error:'当前回合已变化，请刷新聊天后切换。'});
+      return reply(200,{turnId:turn.turnId,nativeId:row.codex_session_id});
+    }
     if (get) {
       let label = account;
       if (!account && choices.length) {
@@ -108,7 +171,10 @@ export async function handleAccountSessions(req, res, url, api) {
     try {
       const fresh = await api.session(row.id);
       if (fresh.tool !== tool || fresh.ssh_host || rowAccount(fresh) !== body.from || body.from === body.slot) return reply(409,{error:'会话账号已变化，请重新核对。'});
-      if (busy(fresh)) return reply(409,{error:'请等待当前回答、队列或交互完成后切换。'});
+      const confirmation = body.interruptTurn;
+      if (confirmation && (tool !== 'codex' || !plain(confirmation.turnId,100) || !confirmation.turnId ||
+          !fresh.codex_session_id || confirmation.nativeId !== fresh.codex_session_id)) return reply(409,{error:'请重新确认要中断的 Codex 回合。'});
+      if (!confirmation && await busy(fresh)) return reply(409,{error:'请等待当前回答、队列或交互完成后切换。'});
       const harness = await native(api, ['harness', 'status', tool]);
       if (!harness.accounts?.some(entry => entry.name === body.slot && entry.logged_in === true)) {
         return reply(409, {error:'目标账号尚未检测到登录，请先在设置的账号管理中完成授权。'});
@@ -119,8 +185,14 @@ export async function handleAccountSessions(req, res, url, api) {
       if (!info.source_session_id || !(tool === 'codex' ? fresh.codex_session_id : fresh.claude_session_id)) {
         return reply(409,{error:'此会话尚未记录原生对话 ID，请先启动并完成一轮对话。'});
       }
+      let resume = false;
+      if (confirmation) {
+        if (info.source_session_id !== confirmation.nativeId) return reply(409,{error:'原生对话身份已变化。'});
+        try { resume = await finishConfirmedTurn(api,fresh,confirmation); }
+        catch { return reply(409,{error:'未能确认原回合已安全结束，已停止切换。请核对当前对话。'}); }
+      }
       const latest = await api.session(row.id);
-      if (latest.tool !== tool || latest.ssh_host || rowAccount(latest) !== body.from || busy(latest) ||
+      if (latest.tool !== tool || latest.ssh_host || rowAccount(latest) !== body.from || await busy(latest) ||
           fresh.claude_session_id !== latest.claude_session_id || fresh.codex_session_id !== latest.codex_session_id) return reply(409,{error:'会话状态发生变化，请重新核对。'});
       let hasPane = latest.status === 'waiting';
       if (latest.status === 'idle' && latest.tmux_session) {
@@ -138,6 +210,15 @@ export async function handleAccountSessions(req, res, url, api) {
       const onStart = result.status === 'pending' && result.pending === true && result.restarted === false && result.destination_ready === false;
       if (result.id !== fresh.id || result.new_account !== body.slot || rowAccount(actual) !== body.slot ||
           actual.tool !== tool || !(result.success || onStart)) return reply(409,{error:'切换结果待核对，请查看当前账号和会话状态。'});
+      if (resume) {
+        let continuation;
+        try {
+          if (result.restarted !== true || result.destination_ready !== true || actual.codex_session_id !== confirmation.nativeId) throw new Error('not ready');
+          continuation = await continueSwitchedTurn(api,actual,confirmation,info.target_account_dir);
+        } catch { return reply(200,{success:true,account:rowAccount(actual),continuationUnconfirmed:true}); }
+        return reply(200,{success:true,account:rowAccount(actual),continuation,onStart,
+          continuationUnconfirmed:!!continuation && !continuation.sendId});
+      }
       return reply(200,{success:true,account:rowAccount(actual),onStart});
     } finally { release(); }
   } catch { return reply(409,{error:get ? '暂时无法读取账号配置。' : '原生操作未确认完成，请刷新账号或会话列表核对。'}); }
