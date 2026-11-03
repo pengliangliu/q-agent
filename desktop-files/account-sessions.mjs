@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { acquireNativeControl, hasPendingSend, nativeComposer } from './native-controls.mjs';
 import { manualLogin } from './manual-login.mjs';
 import { send } from './chat-backend.mjs';
-import { interruptibleCodex } from './deliver-now-control.mjs';
+import { interruptibleCodex, officialSendLock } from './deliver-now-control.mjs';
 
 const helper = fileURLToPath(new URL('./account-login.py', import.meta.url));
 const tools = ['claude', 'codex'];
@@ -132,6 +132,43 @@ async function continueSwitchedTurn(api,actual,confirmation,targetHome) {
   } while (Date.now() < deadline);
   throw new Error('destination not ready');
 }
+
+async function switchWithRecovery(api,args,row,confirmation) {
+  try { return await native(api,args,120000); }
+  catch (error) {
+    let result;
+    try { result = JSON.parse(error.stdout || '{}'); } catch {}
+    const message = typeof result?.error === 'string' ? result.error : '';
+    const paddingRefusal = row.tool === 'codex' && message.startsWith('exact Codex source preflight failed:') &&
+      message.includes('validate context artifact') && /invalid character '(?:\\x00|\\u0000)'/.test(message);
+    if (!paddingRefusal) {
+      if (message.includes('validate context artifact')) throw new Error('对话历史包含无法自动恢复的数据，原生切换已停止。');
+      if (/destination.*(?:newer|diverg|conflict)|different.*destination/i.test(message)) {
+        throw new Error('目标账号中已有不同版本的这条对话，请先核对目标会话。');
+      }
+      throw error;
+    }
+    // The native refusal occurs before its first durable switch boundary.
+    // Repair only NUL-only padding, then retry this exact request once.
+    const request = {deck:api.deck,sessionId:row.id,nativeId:row.codex_session_id,account:rowAccount(row),
+      profile:row.profile || '',sendLock:await officialSendLock(row.id)};
+    let recovered;
+    try {
+      const { stdout } = await api.exec('/usr/bin/python3',[path.join(path.dirname(helper),'repair-codex-padding.py'),JSON.stringify(request)],
+        {timeout:60000,maxBuffer:16384});
+      recovered = JSON.parse(stdout);
+    } catch { throw new Error('历史文件的自动恢复未完成，请刷新当前会话后重试。'); }
+    if (recovered.repaired !== true) throw new Error('历史记录无法按空字节填充方式恢复，原生切换已停止。');
+    const fresh = await api.session(row.id);
+    if (fresh.tool !== row.tool || fresh.codex_session_id !== row.codex_session_id || fresh.tmux_session !== row.tmux_session ||
+        rowAccount(fresh) !== rowAccount(row) || (await busy(fresh) && !(confirmation && await endedCodexTurn(api,fresh,confirmation)))) {
+      throw new Error('历史填充已恢复，当前回合或账号已变化，请刷新后重新切换。');
+    }
+    const pane = await native(api,[...prefix(fresh),'session','output',row.id,'--pane','--primary']);
+    if (!pane.success || !nativeComposer(row.tool,pane.content)) throw new Error('历史填充已恢复，请先处理当前输入框中的草稿或确认。');
+    return native(api,args,120000);
+  }
+}
 export async function handleAccountSessions(req, res, url, api) {
   const route = url.pathname;
   const manual = /^\/desktop\/accounts\/manual\/(start|status|submit|cancel)$/.exec(route)?.[1];
@@ -251,7 +288,15 @@ export async function handleAccountSessions(req, res, url, api) {
       }
       const args = [...prefix(fresh),'session','switch',fresh.id,'--to-harness',tool,'--no-settle'];
       if (body.slot) args.push('--to-account='+body.slot);
-      const result = await native(api,args,120000);
+      let result;
+      try { result = await switchWithRecovery(api,args,latest,confirmation); }
+      catch (error) {
+        const known = ['对话历史包含无法自动恢复的数据，原生切换已停止。','目标账号中已有不同版本的这条对话，请先核对目标会话。',
+          '历史文件的自动恢复未完成，请刷新当前会话后重试。','历史记录无法按空字节填充方式恢复，原生切换已停止。',
+          '历史填充已恢复，当前回合或账号已变化，请刷新后重新切换。','历史填充已恢复，请先处理当前输入框中的草稿或确认。'];
+        if (known.includes(error.message)) return reply(409,{error:error.message});
+        throw error;
+      }
       let actual = await api.session(fresh.id);
       const onStart = result.status === 'pending' && result.pending === true && result.restarted === false && result.destination_ready === false;
       const pendingRestart = tool === 'codex' && result.status === 'pending' && result.pending === true && result.restarted === true;

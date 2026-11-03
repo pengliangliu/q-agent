@@ -27,14 +27,17 @@ export function SessionAccount({sessionId, tool, observedAccount, running, disab
   const controller = useRef(null), submitting = useRef(false), alive = useRef(true)
   const en = languageSignal.value === 'en'
   const t = (zh, english) => en ? english : zh
-  async function read() {
+  async function read(preserveTarget = false) {
     setConfirmation(null)
     controller.current?.abort()
     const ctrl = new AbortController()
     controller.current = ctrl
     try {
       const info = await accountRequest('current?' + new URLSearchParams({sessionId,tool}), undefined, ctrl.signal)
-      if (!ctrl.signal.aborted) { setData(info); setTarget(info.account) }
+      if (!ctrl.signal.aborted) {
+        setData(info)
+        setTarget(previous => preserveTarget && info.slots.includes(previous) ? previous : info.account)
+      }
     } catch (err) { if (!ctrl.signal.aborted) { setData(null); setError(err.message) } }
   }
   useEffect(() => {
@@ -47,6 +50,7 @@ export function SessionAccount({sessionId, tool, observedAccount, running, disab
     if (!data || submitting.current || disabled || target === data.account) return
     controller.current?.abort(); submitting.current = true; setBusy(true); onBusyChange(true); setError(''); setNotice('')
     const preparing = running && tool === 'codex' && !confirmation
+    let succeeded = false
     try {
       if (preparing) {
         const turn = await accountRequest('switch-turn?' + new URLSearchParams({sessionId,tool}))
@@ -54,6 +58,7 @@ export function SessionAccount({sessionId, tool, observedAccount, running, disab
         return
       }
       const result = await accountRequest('switch',{sessionId,tool,slot:target,from:data.account,...(confirmation ? {interruptTurn:confirmation} : {})})
+      succeeded = result.success === true
       if (result.success && alive.current) {
         setNotice(result.destinationPending ? t('账号已绑定，原生会话启动结果待核对，请刷新。','Account assigned. Refresh to check the native session startup.') :
           result.continuationUnconfirmed ? t('账号已切换，接续投递尚未确认，请查看对话和原回执。','Account switched. Check the chat for continuation status.') :
@@ -63,7 +68,7 @@ export function SessionAccount({sessionId, tool, observedAccount, running, disab
       }
     } catch (err) { if (alive.current) setError(err.message) }
     finally {
-      if (alive.current) { if (!preparing) await read(); setBusy(false); onBusyChange(false) }
+      if (alive.current) { if (!preparing) await read(!succeeded); setBusy(false); onBusyChange(false) }
       submitting.current = false
     }
   }

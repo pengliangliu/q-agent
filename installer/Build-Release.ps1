@@ -56,7 +56,7 @@ $files = @(
 )
 $files += $clientNames | ForEach-Object { 'desktop-client/dist/' + $_ }
 $files += @(
-    'account-login.py', 'account-sessions.mjs', 'account-batches.mjs', 'manual-login.mjs', 'account-terminal.ps1', 'agent-deck-files.py', 'chat-backend.mjs', 'chat-history.py', 'chat-quota.mjs',
+    'account-login.py', 'account-sessions.mjs', 'account-batches.mjs', 'repair-codex-padding.py', 'manual-login.mjs', 'account-terminal.ps1', 'agent-deck-files.py', 'chat-backend.mjs', 'chat-history.py', 'chat-quota.mjs',
     'claude-slash-commands.json', 'claude-statusline.py', 'codex-slash-commands.json',
     'codex-suggestions.mjs', 'command-backend.mjs', 'completion-status.mjs',
     'deliver-now-control.mjs', 'deliver-now.mjs', 'desktop-diagnostics.mjs',
