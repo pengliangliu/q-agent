@@ -92,11 +92,8 @@ async function desktop(req, res, url) {
     if (url.pathname === '/desktop/accounts' && req.method === 'GET') {
       const accounts = await Promise.all(providers.map(async tool => {
         try {
-          const { stdout } = await exec(deck, ['harness', 'status', tool, '--json'], { timeout: 20000 });
-          const info = JSON.parse(stdout);
-          const slots = info.accounts.map(item => ({ name: item.name, loggedIn: item.logged_in }));
-          const loginSupported = info.login_command === (tool === 'claude' ? 'claude auth login' : 'codex login');
-          return { tool, installed: info.installed, loginSupported, loggedIn: slots.length ? null : info.logged_in, slots };
+          const { stdout } = await exec('/usr/bin/python3', [path.join(root, 'account-login.py'), 'status', tool], { timeout: 30000 });
+          return JSON.parse(stdout);
         } catch { return { tool, unavailable: true, slots: [] }; }
       }));
       return reply(res, 200, { accounts });

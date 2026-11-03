@@ -44,6 +44,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
   const refreshRevision = useRef(0)
   const failedRequest = useRef(false)
   const panel = useRef(null)
+  const catalogChecked = useRef(0)
   const failedPending = pending?.state === 'failed' && pending.requestActive === false
 
   function savePending(value) {
@@ -89,7 +90,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
     }
   }
 
-  async function refresh(signal, quiet = false) {
+  async function refresh(signal, quiet = false, readCatalog = !quiet && Boolean(panel.current)) {
     if (!['claude', 'codex'].includes(tool)) return
     if (refreshing.current) { if (!quiet) refreshAgain.current = true; return }
     refreshing.current = true
@@ -97,7 +98,9 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
     const operation = pendingRef.current
     if (!quiet) { setLoading(true); if (!failedRequest.current) setError('') }
     try {
+      if (readCatalog) catalogChecked.current = Date.now()
       const data = await modelRequest('/desktop/chat/models?' + new URLSearchParams({ sessionId,
+        ...(readCatalog ? { catalog:'refresh' } : {}),
         ...(operation ? { requestId: operation.requestId } : {}) }), undefined, signal)
       if (!alive.current || revision !== refreshRevision.current) return
       acceptState(data)
@@ -129,7 +132,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
     finally {
       refreshing.current = false
       if (alive.current && !quiet) setLoading(false)
-      if (alive.current && refreshAgain.current) { refreshAgain.current = false; refresh() }
+      if (alive.current && refreshAgain.current) { refreshAgain.current = false; refresh(undefined, false, Boolean(panel.current)) }
     }
   }
 
@@ -138,7 +141,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
     const controller = new AbortController()
     refresh(controller.signal)
     const syncVisible = () => {
-      if (document.visibilityState === 'visible' && !posting.current) refresh(undefined, true)
+      if (document.visibilityState === 'visible' && !posting.current) refresh(undefined, true, Boolean(panel.current) && Date.now() - catalogChecked.current >= 60000)
     }
     const flush = event => {
       try {
@@ -164,7 +167,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
   useEffect(() => {
     if (!openRequest) return
     prefill.current = openRequest.modelId || openRequest.reasoningEffort ? openRequest : null
-    touched.current = false; if (!openRequest.refreshOnly) setOpen(true); setNotice(''); refresh()
+    touched.current = false; if (!openRequest.refreshOnly) setOpen(true); setNotice(''); refresh(undefined, false, !openRequest.refreshOnly || Boolean(panel.current))
   }, [openRequest])
 
   useEffect(() => {
@@ -257,7 +260,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
 
   return html`<div class="chat-model-controls" onKeyDown=${event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); setOpen(false) } }} onKeyUp=${event => event.stopPropagation()}>
     <button type="button" class="chat-model-toggle" aria-label="选择模型与强度" aria-expanded=${open} title=${(currentModelId || '当前模型未确认') + ' · ' + strength + '；点击设置'}
-      onClick=${() => { if (!open) { if (!failedRequest.current) touched.current = false; setNotice(''); refresh() }; setOpen(value => !value) }}>
+      onClick=${() => { if (!open) { if (!failedRequest.current) touched.current = false; setNotice(''); refresh(undefined, false, true) }; setOpen(value => !value) }}>
       <span style=${{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px' }}>
         <span translate="no">${currentModelId || (tool === 'claude' ? 'Claude' : 'Codex') + ' · 模型未确认'}</span><small>${strength}</small>
       </span><span aria-hidden="true">⌄</span>
@@ -274,6 +277,9 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
         onChange=${event => { touched.current = true; setEffort(event.currentTarget.value) }}><option value="" disabled>请选择强度</option>
         ${efforts.map(value => html`<option key=${value} value=${value}>${effortText(value)}</option>`)}</select></label>`}
       ${loading && html`<p role="status">正在核对当前模型…</p>`}
+      ${state?.catalogSource === 'fallback' && html`<p role="status">原生目录暂时无法刷新，显示备用列表。</p>`}
+      ${state?.catalogSource === 'account-cache' && html`<p>使用此账号的本机模型目录，窗口打开时会继续刷新。</p>`}
+      ${state?.catalogSource === 'bundled' && html`<p>当前显示已安装 CLI 随附的模型目录。</p>`}
       ${(disabled || state?.canChange === false) && html`<p>${state?.reason || '当前会话处理完成后可切换模型。'}</p>`}
       ${pending && !failedPending && html`<p role="status">${pending.message || (pending.state === 'pending' ? '正在应用设置，等待原生会话确认…' : '切换结果尚未确认，请刷新核对当前状态。')}</p>`}
       ${(error || notice) && html`<p role=${error ? 'alert' : 'status'}>${error || notice}</p>`}

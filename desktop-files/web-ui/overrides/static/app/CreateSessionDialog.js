@@ -9,7 +9,7 @@ import {
 } from './state.js'
 import { activeTabSignal } from './uiState.js'
 import { Icon, ICONS } from './icons.js'
-import { apiFetch } from './api.js'
+import { apiFetch, authHeaders } from './api.js'
 import { addToast } from './Toast.js'
 import { accountRequest } from './SessionAccount.js'
 import { PathInput } from './PathInput.js'
@@ -28,6 +28,7 @@ export function CreateSessionDialog() {
   const sending = useRef(false)
   const [tool, setTool] = useState('claude')
   const [modelId, setModelId] = useState('')
+  const [catalog, setCatalog] = useState(null)
   const [customModel, setCustomModel] = useState('')
   const [reasoningEffort, setReasoningEffort] = useState('')
   const [path, setPath] = useState('')
@@ -76,11 +77,36 @@ export function CreateSessionDialog() {
       .catch(() => { if (!ctrl.signal.aborted) setSlotError(true) })
     return () => ctrl.abort()
   }, [!!open,tool])
+  useEffect(() => {
+    if (!open || !['claude','codex'].includes(tool)) return
+    const ctrl = new AbortController()
+    let reading = false
+    async function refresh() {
+      if (document.hidden || reading) return
+      reading = true
+      try {
+        const response = await fetch('/desktop/model-catalog?' + new URLSearchParams({tool, slot:account}), {
+          headers:authHeaders({'X-AgentDeck-Desktop':'1'}), signal:ctrl.signal,
+        })
+        if (!response.ok) throw new Error()
+        const data = await response.json()
+        if (!ctrl.signal.aborted) setCatalog({tool, account, models:data.models, source:data.catalogSource})
+      } catch {
+        if (!ctrl.signal.aborted) setCatalog(previous => ({tool, account, source:'fallback',
+          models:previous?.tool === tool && previous.account === account ? previous.models : []}))
+      } finally { reading = false }
+    }
+    refresh()
+    const timer = setInterval(refresh, 60000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => { ctrl.abort(); clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh) }
+  }, [!!open, tool, account])
   if (!mutationsEnabledSignal.value) return null
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (sending.current) return
+    if (sending.current || submitDisabled) return
     sending.current = true
     setError(null)
     setSubmitting(true)
@@ -126,13 +152,18 @@ export function CreateSessionDialog() {
 
   const close = () => (createSessionDialogSignal.value = null)
   const handleBackdropClick = (e) => { if (e.target === e.currentTarget) close() }
-  const modelIDs = modelOptionsForTool(tool, modelCatalogSignal.value)
-  const reasoningEfforts = effortOptionsForTool(tool, selectedModelId(), modelCatalogSignal.value)
+  const scoped = catalog?.tool === tool && catalog.account === account ? catalog : null
+  const loadingCatalog = ['claude','codex'].includes(tool) && !scoped
+  const modelIDs = loadingCatalog ? [] : scoped?.models?.length ? scoped.models : modelOptionsForTool(tool, modelCatalogSignal.value)
+  const nativeModel = scoped?.models?.find(model => model.value === selectedModelId())
+  const reasoningEfforts = nativeModel ? nativeModel.reasoningEfforts.map(value => ({value, label:value})) :
+    effortOptionsForTool(tool, selectedModelId(), modelCatalogSignal.value)
   // The options change with the model (select or custom id) and with the
   // settings hydration; an effort they no longer offer is never submitted.
   const effectiveEffort = reasoningEfforts.some(e => e.value === reasoningEffort) ? reasoningEffort : ''
   const needsCustomModel = modelId === CUSTOM_MODEL
-  const submitDisabled = submitting || !title || !path || (needsCustomModel && !customModel.trim())
+  const staleSelection = modelId && !needsCustomModel && !modelIDs.some(model => model.value === modelId)
+  const submitDisabled = submitting || !title || !path || staleSelection || (needsCustomModel && !customModel.trim())
 
   return html`
     <div class="overlay path-dialog-overlay" onClick=${handleBackdropClick}>
@@ -181,7 +212,7 @@ export function CreateSessionDialog() {
             <select id="create-account" value=${account} onChange=${e => setAccount(e.currentTarget.value)}>
               <option value="">默认账号（跟随配置）</option>${slots.map(name => html`<option key=${name} value=${name}>${name}</option>`)}
             </select>${slotError && html`<small role="alert">账号列表读取失败，可重新打开窗口。</small>`}</div>`}
-          ${modelIDs.length > 0 && html`
+          ${(modelIDs.length > 0 || scoped || loadingCatalog) && html`
             <div class="field">
               <label>模型 ID</label>
               <select value=${modelId} onInput=${e => setModelId(e.target.value)}>
@@ -191,6 +222,11 @@ export function CreateSessionDialog() {
                 `)}
                 <option value=${CUSTOM_MODEL}>自定义模型 ID…</option>
               </select>
+              ${loadingCatalog && html`<small role="status">正在读取当前账号的原生模型目录…</small>`}
+              ${scoped?.source === 'fallback' && html`<small>原生目录暂时无法刷新，显示备用列表。</small>`}
+              ${scoped?.source === 'account-cache' && html`<small>使用此账号的本机模型目录，窗口打开时会继续刷新。</small>`}
+              ${scoped?.source === 'bundled' && html`<small>当前显示已安装 CLI 随附的模型目录。</small>`}
+              ${staleSelection && !loadingCatalog && html`<small role="alert">此模型已从目录移除，请重新选择或输入自定义模型 ID。</small>`}
             </div>
             ${needsCustomModel && html`
               <div class="field">
@@ -205,7 +241,7 @@ export function CreateSessionDialog() {
               <select value=${effectiveEffort} onInput=${e => setReasoningEffort(e.target.value)}>
                 <option value="">工具默认值</option>
                 ${reasoningEfforts.map(effort => html`
-                  <option key=${effort.value} value=${effort.value}>${effort.label} — ${effort.value}</option>
+                  <option key=${effort.value} value=${effort.value}>${effort.label === effort.value ? effort.value : effort.label + ' — ' + effort.value}</option>
                 `)}
               </select>
             </div>

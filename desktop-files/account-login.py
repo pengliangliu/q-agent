@@ -89,18 +89,94 @@ def default_dir(tool, slots):
             configured = parse_config(file.read_text(encoding='utf-8')).get('codex', {}).get('config_dir', '')
     return Path(configured).expanduser() if configured else Path.home()/('.' + tool)
 
-def login_target(tool, slot):
-    info = deck('harness', 'status', tool)
+def login_target(tool, slot, info=None, session_dir=None, require_login=True):
+    info = info if info is not None else deck('harness', 'status', tool)
     slots = {entry['name']: entry['config_dir'] for entry in info['accounts']}
     if slot and slot not in slots:
         raise ValueError('unknown slot')
-    directory = Path(slots[slot]).expanduser() if slot else default_dir(tool, slots)
+    directory = Path(session_dir) if session_dir else Path(slots[slot]).expanduser() if slot else default_dir(tool, slots)
     binary = Path(info.get('path') or '')
     if not directory.is_absolute() or not info.get('installed') or not binary.is_absolute() or str(binary).startswith('/mnt/') or not os.access(binary, os.X_OK):
         raise ValueError('native tool unavailable')
-    if info.get('login_command') != ' '.join([tool, *LOGIN[tool]]):
+    if require_login and info.get('login_command') != ' '.join([tool, *LOGIN[tool]]):
         raise ValueError('custom login command')
     return binary, directory
+
+def scoped_env(tool, directory):
+    env = dict(os.environ, **{CONFIG_ENV[tool]: str(directory)})
+    if tool == 'claude' and 'CLAUDE_SECURESTORAGE_CONFIG_DIR' in env:
+        env['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = str(directory)
+    return env
+
+def account_status(tool):
+    info = deck('harness', 'status', tool)
+    slots = [dict(name=item['name'], loggedIn=item['logged_in']) for item in info['accounts']]
+    status = info['logged_in']
+    if slots:
+        # The harness flag aggregates all slots, so check the default separately.
+        status = None
+        try:
+            binary, directory = login_target(tool, '', info)
+            args = ['auth', 'status', '--json'] if tool == 'claude' else ['login', 'status']
+            p = subprocess.run([str(binary), *args], capture_output=True, text=True,
+                               timeout=8, cwd=Path.home(), env=scoped_env(tool, directory))
+            if tool == 'claude' and p.returncode in (0, 1):
+                value = json.loads(p.stdout).get('loggedIn')
+                if isinstance(value, bool): status = value
+            elif tool == 'codex':
+                lines = (p.stdout + '\n' + p.stderr).splitlines()
+                if p.returncode == 0 and any(s.startswith('Logged in using ') for s in lines): status = True
+                if p.returncode == 1 and 'Not logged in' in lines: status = False
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    return dict(tool=tool, installed=info['installed'], slots=slots, loggedIn=status,
+                loginSupported=info.get('login_command') == ' '.join([tool, *LOGIN[tool]]))
+
+def native_models(tool, slot, directory):
+    binary, home = login_target(tool, slot, session_dir=directory, require_login=False)
+    options = dict(cwd='/tmp', env=scoped_env(tool, home), timeout=12, stderr=subprocess.DEVNULL, text=True)
+    if tool == 'codex':
+        try:
+            cached = json.loads((home/'models_cache.json').read_text())['models']
+        except (OSError, ValueError, KeyError):
+            cached = []
+        source = 'native'
+        command = [str(binary), 'debug', 'models']
+        try:
+            rows = json.loads(subprocess.check_output(command, **options))['models']
+            # Codex can silently return the bundled list on network failure. Its
+            # last account catalog can include models absent from that bundle.
+            if rows != cached and rows == json.loads(subprocess.check_output([*command, '--bundled'], **options))['models']:
+                rows, source = (cached, 'account-cache') if cached else (rows, 'bundled')
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+            if not cached: raise
+            rows, source = cached, 'account-cache'
+        models = [dict(value=m['slug'], label=m.get('display_name') or m['slug'],
+                     reasoningEfforts=[r['effort'] for r in m.get('supported_reasoning_levels') or []])
+                  for m in rows if m.get('visibility') == 'list' and re.fullmatch(r'gpt-[a-zA-Z0-9.-]+', m['slug'])]
+        return dict(models=models, catalogSource=source)
+    # Only the initialization control message. No chat input, history, project
+    # hooks or MCP servers are needed to ask the installed CLI for its menu.
+    request = dict(type='control_request', request_id='catalog', request=dict(subtype='initialize'))
+    args = ['-p', '--verbose', '--input-format', 'stream-json', '--output-format', 'stream-json',
+            '--no-session-persistence', '--strict-mcp-config', '--disable-slash-commands', '--settings', '{"disableAllHooks":true}']
+    raw = subprocess.check_output([str(binary), *args], input=json.dumps(request)+'\n', **options)
+    for line in raw.splitlines():
+        record = json.loads(line)
+        response = record.get('response') or {}
+        if record.get('type') != 'control_response' or response.get('request_id') != 'catalog': continue
+        models = {}
+        for model in response['response']['models']:
+            value, label = model['value'], model['displayName']
+            if value == 'default': continue
+            if not value.startswith('claude-'):
+                # Native aliases such as "opus" report their current version in the label.
+                match = re.fullmatch(r'([a-zA-Z]+) (\d+(?:\.\d+)*)', label)
+                if not match or match[1].lower() != value: continue
+                value = 'claude-' + value + '-' + match[2].replace('.', '-')
+            models[value] = dict(value=value, label=label, reasoningEfforts=model.get('supportedEffortLevels') or [])
+        return dict(models=list(models.values()), catalogSource='native')
+    raise ValueError('missing catalog')
 
 def wsl_distribution():
     distro = os.environ.get('WSL_DISTRO_NAME')
@@ -141,13 +217,17 @@ def open_login(tool, slot):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['open', 'interactive', 'manual', 'add'])
+    parser.add_argument('action', choices=['open', 'interactive', 'manual', 'add', 'status', 'models'])
     parser.add_argument('tool', choices=list(LOGIN))
     parser.add_argument('--slot', default='')
     parser.add_argument('--bind-default', action='store_true')
     parser.add_argument('--binary')
     parser.add_argument('--directory')
     args = parser.parse_args()
+    if args.action in ('status', 'models'):
+        result = account_status(args.tool) if args.action == 'status' else native_models(args.tool, args.slot, args.directory)
+        print(json.dumps(result))
+        return 0
     if args.action == 'add':
         try:
             add_slot(args.tool, args.slot, args.bind_default)
@@ -169,10 +249,7 @@ def main():
         binary, directory = Path(args.binary), Path(args.directory)
     if not binary.is_absolute() or not directory.is_absolute():
         raise ValueError('native path required')
-    os.environ[CONFIG_ENV[args.tool]] = str(directory)
-    # Claude uses a separate credential namespace when this variable is set.
-    if args.tool == 'claude' and 'CLAUDE_SECURESTORAGE_CONFIG_DIR' in os.environ:
-        os.environ['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = str(directory)
+    os.environ.update(scoped_env(args.tool, directory))
     os.environ['PATH'] = str(Path.home()/'.local/bin') + ':' + os.environ.get('PATH', '/usr/bin:/bin')
     os.chdir(Path.home())
     if args.action == 'manual':

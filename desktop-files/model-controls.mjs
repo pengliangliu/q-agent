@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { acquireNativeControl, nativeComposer, sendVerifiedMenuKey } from './native-controls.mjs';
 
 const receipts = path.join(os.homedir(), '.local/share/agent-deck/chat-receipts/models');
@@ -48,13 +49,40 @@ async function pane(row, api) {
   if (!result.success || (result.session_id && result.session_id !== row.id)) throw new Error('无法读取原会话主终端。');
   return result.content || '';
 }
-async function catalog(row) {
+async function fallbackModels(row) {
   if (row.tool === 'claude') return claudeModels;
-  const cache = JSON.parse(await fs.readFile(path.join(row.resolved_codex_home || path.join(os.homedir(), '.codex'), 'models_cache.json'), 'utf8'));
+  if (row.account && !row.resolved_codex_home) return [];
+  const cache = JSON.parse(await fs.readFile(path.join(row.resolved_codex_home || process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'models_cache.json'), 'utf8'));
   return (cache.models || []).filter(model => /^gpt-[a-z0-9.-]+$/.test(model.slug) && model.visibility === 'list')
     .map(model => ({ value: model.slug, label: model.display_name || model.slug,
       reasoningEfforts: (model.supported_reasoning_levels || []).map(level => level.effort)
         .filter(level => ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(level)) }));
+}
+
+const catalogs = new Map();
+const accountHelper = fileURLToPath(new URL('./account-login.py', import.meta.url));
+async function catalog(row, api, refresh = false) {
+  const dir = row.tool === 'codex' ? row.resolved_codex_home : row.resolved_claude_config_dir;
+  const key = JSON.stringify([row.tool, row.account || '', dir || '']);
+  let entry = catalogs.get(key);
+  if (!entry) { entry = {}; catalogs.set(key, entry); }
+  if (entry.pending) return entry.pending;
+  if (entry.result && (!refresh || Date.now() - entry.checked < 3000)) return entry.result;
+  entry.pending = (async () => {
+    try {
+      const args = [accountHelper, 'models', row.tool, '--slot=' + (row.account || '')];
+      if (dir) args.push('--directory=' + dir);
+      const { stdout } = await api.exec('/usr/bin/python3', args, { timeout: 20000, maxBuffer: 2 * 1024 * 1024 });
+      const { models, catalogSource } = JSON.parse(stdout);
+      if (!Array.isArray(models) || !models.length) throw new Error('missing catalog');
+      entry.result = { models, catalogSource };
+    } catch {
+      const models = entry.result?.models || await fallbackModels(row).catch(() => []);
+      entry.result = { models, catalogSource: 'fallback' };
+    } finally { entry.checked = Date.now(); entry.pending = null; }
+    return entry.result;
+  })();
+  return entry.pending;
 }
 
 export function modelCurrent(tool, content, models) {
@@ -63,14 +91,14 @@ export function modelCurrent(tool, content, models) {
   if (tool === 'codex') {
     for (const line of lines) {
       for (const candidate of models) {
-        const match = line.match(new RegExp('^\\s*' + escape(candidate.label) + '\\s+(minimal|low|medium|high|xhigh|max|ultra)\\s*·', 'i'));
-        if (match) { model = candidate; effort = match[1].toLowerCase(); }
+        const match = line.match(new RegExp('^\\s*' + escape(candidate.label) + '\\s+(default|minimal|low|medium|high|xhigh|max|ultra)\\s*·', 'i'));
+        if (match) { model = candidate; effort = match[1].toLowerCase() === 'default' ? '' : match[1].toLowerCase(); }
       }
     }
   } else {
     for (const line of lines) {
-      const header = line.match(/^[▝▜▐▀█].*?\b((?:Opus|Sonnet|Haiku|Fable) \d+(?:\.\d+)?)(?: with (low|medium|high|xhigh|max) effort)?\s*·/i);
-      const changed = line.match(/Set model to ((?:Opus|Sonnet|Haiku|Fable) \d+(?:\.\d+)?) for this session only(?: with (low|medium|high|xhigh|max) effort)?/i);
+      const header = line.match(/^[▝▜▐▀█].*?\b([A-Za-z]+ \d+(?:\.\d+)*)(?: with (low|medium|high|xhigh|max) effort)?\s*·/i);
+      const changed = line.match(/Set model to (.+?) for this session only(?: with (low|medium|high|xhigh|max) effort)?/i);
       const match = changed || header;
       if (match) {
         const candidate = models.find(item => normalized(item.label) === normalized(match[1]));
@@ -78,7 +106,7 @@ export function modelCurrent(tool, content, models) {
       }
     }
     // A live footer overrides any older local-command output still in scrollback.
-    const footer = lines.findLast(line => /^\s*(?:Opus|Sonnet|Haiku|Fable) \d+(?:\.\d+)?\s*\|/.test(line));
+    const footer = lines.findLast(line => models.some(item => line.trimStart().startsWith(item.label + ' |')));
     if (footer) {
       const candidate = models.find(item => footer.trim().startsWith(item.label + ' |'));
       if (candidate) { model = candidate; effort = candidate.reasoningEfforts.length ? undefined : ''; }
@@ -205,7 +233,7 @@ export function modelMenu(tool, content) {
     let label = match[3].replace(/\s*✔/g, '').replace(/\s*\((?:current|default)\)/g, '').trim();
     // Some native catalogs abbreviate the row to "Opus" and put its exact
     // version first in the description. Require that same family and version.
-    const version = tool === 'claude' && /^(?:Opus|Sonnet|Haiku|Fable)$/.test(label)
+    const version = tool === 'claude' && /^[A-Za-z]+$/.test(label)
       ? match[4].match(new RegExp('^' + label + ' \\d+(?:\\.\\d+)?(?=\\s|$)'))?.[0] : null;
     if (version) label = version;
     return [{ number: Number(match[2]), label, selected: /^[❯›]/.test(match[1] || '') }];
@@ -225,18 +253,18 @@ function ready(row, raw) {
     !(row.hook_status_fresh && row.hook_status === 'running') &&
     !(row.queue || []).some(item => ['queued', 'typing', 'typed', 'submitted'].includes(item.state)) && modelComposer(row.tool, raw);
 }
-async function snapshot(id, api) {
+async function snapshot(id, api, refresh = false) {
   if (!identifier(id)) throw new Error('会话标识无效。');
   const row = await api.session(id);
   if (row.id !== id || row.ssh_host || !['claude', 'codex'].includes(row.tool)) throw new Error('模型切换支持本机 Claude 和 Codex 会话。');
-  const models = await catalog(row).catch(() => []);
+  const { models, catalogSource } = await catalog(row, api, refresh);
   const raw = ['stopped', 'error', 'starting'].includes(row.status) ? '' : await pane(row, api);
   const screenCurrent = modelCurrent(row.tool, raw, models);
   const sessionCurrent = await nativeSessionCurrent(row, models, api).catch(() => null);
   const current = sessionCurrent && (!screenCurrent.modelId || screenCurrent.modelId === sessionCurrent.modelId) ? sessionCurrent : screenCurrent;
   const effortEvidence = await claudeEffortEvidence(row, current.modelId).catch(() => null);
   const canChange = models.length > 0 && ready(row, raw);
-  return { row, raw, sessionId: id, tool: row.tool, models, current, effortEvidence, canChange,
+  return { row, raw, sessionId: id, tool: row.tool, models, catalogSource, current, effortEvidence, canChange,
     reason: canChange ? '' : models.length ? '会话空闲且原生输入框为空时可以切换模型。' : '当前可用模型目录尚未读取，请刷新后再试。',
     revision: hash([identity(row), current.modelId, current.reasoningEffort, current.verified, canChange]) };
 }
@@ -442,12 +470,18 @@ async function clearModelDraft(body, api) {
 }
 
 export async function handleModel(req, res, url, api) {
-  if (!['/desktop/chat/models', '/desktop/chat/model', '/desktop/chat/model/clear-draft'].includes(url.pathname)) return false;
+  if (!['/desktop/model-catalog', '/desktop/chat/models', '/desktop/chat/model', '/desktop/chat/model/clear-draft'].includes(url.pathname)) return false;
   const reply = (code, body) => { api.reply(res, code, body); return true; };
   try {
+    if (url.pathname === '/desktop/model-catalog') {
+      if (req.method !== 'GET' || req.headers['x-agentdeck-desktop'] !== '1') return reply(403, { error: 'local-ui-required' });
+      const tool = url.searchParams.get('tool'), account = url.searchParams.get('slot') || '';
+      if (!['claude','codex'].includes(tool) || account.length > 128 || /[\x00-\x1f]/.test(account)) return reply(400, { error: 'invalid-account' });
+      return reply(200, await catalog({ tool, account }, api, true));
+    }
     if (req.method === 'GET' && url.pathname.endsWith('/models')) {
       const id = url.searchParams.get('sessionId'), operation = active.get(id);
-      let state = await snapshot(id, api);
+      let state = await snapshot(id, api, url.searchParams.get('catalog') === 'refresh');
       const requestId = url.searchParams.get('requestId');
       if (!requestId) return reply(200, visibleSnapshot(state));
       let record = await load(id, requestId);
