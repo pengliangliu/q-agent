@@ -7,6 +7,7 @@ import { noteSessionStarted } from './terminalReconnect.js'
 import { EmptyStateDashboard } from './EmptyStateDashboard.js'
 import { InlinePrompt } from './InlinePrompt.js'
 import { SessionModelControls } from './SessionModelControls.js'
+import { SessionAccount } from './SessionAccount.js'
 import { ChatQuota } from './ChatQuota.js'
 import { SlashCommandMenu, filterSlashCommands, slashInsertText } from './SlashCommandMenu.js'
 import { slashCommandPolicy } from './slashCommandPolicy.js'
@@ -291,6 +292,7 @@ function SessionChat({ sessionId }) {
   const [advancedLoading, setAdvancedLoading] = useState(false)
   const [openingTerminal, setOpeningTerminal] = useState(false)
   const [modelBusy, setModelBusy] = useState(false)
+  const [accountBusy, setAccountBusy] = useState(false)
   const [modelOpenRequest, setModelOpenRequest] = useState(null)
   const [commands, setCommands] = useState([])
   const [commandsLoading, setCommandsLoading] = useState(false)
@@ -348,7 +350,7 @@ function SessionChat({ sessionId }) {
   const commandChoices = filterSlashCommands(commands, store.draft, session?.tool)
   const commandMenuOpen = slashOpen && /^\s*\/[^\s/]*$/.test(store.draft)
   const canSend = !!(store.draft.trim() || store.files.some(file => file.path)) && !uploading && !invalidFile && !readOnly && !stopped && !starting && !requiresAction && !store.pending && !store.sending && !commandPending && !modelBusy && supported && store.loaded && store.history.canSend !== false
-  const canSubmitDraft = canSend && (!isSlashCommand || (!running && store.files.length === 0))
+  const canSubmitDraft = canSend && !accountBusy && (!isSlashCommand || (!running && store.files.length === 0))
   const canFillContinue = requestIssue?.state === 'failed' && store.draft === '' && store.files.length === 0 &&
     !store.pending && !store.sending && !store.promptResponse && !store.responding && !commandPending && !commandPosting.current &&
     !readOnly && !stopped && !starting && !requiresAction && !modelBusy && !historyError && supported && store.loaded
@@ -679,7 +681,7 @@ function SessionChat({ sessionId }) {
   }
 
   async function send() {
-    if (selectedIdSignal.value !== sessionId || store.sending || !canSend) return
+    if (selectedIdSignal.value !== sessionId || store.sending || !canSend || accountBusy) return
     if (isSlashCommand) { await runCommand(); return }
     if (new TextEncoder().encode(store.draft).length > 48000) { setError('消息超过 48 KB，请缩短内容或将长内容作为文件附件发送。'); return }
     dismissSuggestion()
@@ -957,8 +959,12 @@ function SessionChat({ sessionId }) {
       <span aria-current="page">${session?.title || '当前会话'}</span></nav>
       <div class="chat-title-line"><strong translate="no">${session?.title || '当前会话'}</strong><span class=${'chat-state ' + (requestIssue ? 'issue-' + requestIssue.state : running ? 'active' : '')}><i />${statusText}</span></div></div>
       <div class="chat-header-actions"><${ChatQuota} key=${'quota:' + sessionId} sessionId=${sessionId} tool=${session?.tool} />
+        ${['claude','codex'].includes(session?.tool) && html`<${SessionAccount} key=${'account:' + sessionId + ':' + session.tool} sessionId=${sessionId}
+          tool=${session.tool} observedAccount=${store.history.account} onBusyChange=${setAccountBusy}
+          disabled=${readOnly || running || starting || requiresAction || modelBusy || store.sending || store.responding || !!store.pending || !!commandPending}
+          onSwitch=${() => { refreshRef.current?.(); setModelOpenRequest({key:crypto.randomUUID(),refreshOnly:true}) }}/>`}
         <${SessionModelControls} key=${sessionId + ':' + session?.tool} sessionId=${sessionId} tool=${session?.tool}
-        disabled=${readOnly || stopped || running || starting || requiresAction || Boolean(store.pending) || Boolean(commandPending)}
+        disabled=${readOnly || stopped || running || starting || requiresAction || accountBusy || Boolean(store.pending) || Boolean(commandPending)}
         openRequest=${modelOpenRequest} onBusyChange=${value => { modelBusyRef.current = value; setModelBusy(value) }} onApplied=${() => refreshRef.current?.()} />
         <button type="button" class="chat-terminal-button" title="在独立终端打开" aria-label="在独立终端打开" disabled=${openingTerminal} onClick=${openTerminal}>
           <span aria-hidden="true">›_</span><span class="chat-terminal-label">${openingTerminal ? '正在打开…' : '独立终端'}</span></button>

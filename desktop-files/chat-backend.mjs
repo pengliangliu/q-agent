@@ -535,7 +535,7 @@ export async function handleChat(req, res, url, api) {
       const suggestionRow = foregroundIdle ? { ...row, status: 'waiting' } : row;
       const suggestion = canSuggest ? nativeSuggestion(suggestionRow, captured.content, conversationId, turnId) ||
         await codexContextSuggestion(suggestionRow, captured.content, conversationId, data.messages).catch(() => null) : null;
-      return respond(200, { ...data, status: row.status, substate: row.substate || '', prompt: publicPrompt(prompt), suggestion,
+      return respond(200, { ...data, account:row.account || '', status: row.status, substate: row.substate || '', prompt: publicPrompt(prompt), suggestion,
         conversationId, ...activity, responseStatus: await responseStatus(row, prompt),
         startupError: startupFailure(row),
         canSend: !['stopped', 'error', 'starting'].includes(row.status),

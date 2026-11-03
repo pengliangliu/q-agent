@@ -12,6 +12,7 @@ import { handleProject } from './project-backend.mjs';
 import { handleCommand } from './command-backend.mjs';
 import { handleModel } from './model-controls.mjs';
 import { handleTerminal } from './terminal-backend.mjs';
+import { handleAccountSessions } from './account-sessions.mjs';
 import { resolveMessagePath } from './message-paths.mjs';
 import { handleCompletion } from './completion-status.mjs';
 import { handleQuota } from './chat-quota.mjs';
@@ -84,6 +85,7 @@ async function bridge(args) {
 
 async function desktop(req, res, url) {
   const context = { session, reply, bodyJSON, exec, deck, uploads, queuedSender };
+  if (await handleAccountSessions(req, res, url, context)) return;
   if (url.pathname === '/desktop/accounts' || url.pathname === '/desktop/accounts/login') {
     if (req.headers['x-agentdeck-desktop'] !== '1') return reply(res, 403, { error: 'local-ui-required' });
     const providers = ['claude', 'codex'];

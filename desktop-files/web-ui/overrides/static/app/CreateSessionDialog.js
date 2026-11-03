@@ -2,7 +2,7 @@
 // Restyled (PR-B) to use the bundle's `.dialog` / `.dh` / `.db` / `.df` /
 // `.field` / `.seg-row` / `.btn` classes from app.css.
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   createSessionDialogSignal, mutationsEnabledSignal, selectSession,
   toolFilterFallbackSignal, pickerToolsSignal, modelCatalogSignal,
@@ -10,6 +10,8 @@ import {
 import { activeTabSignal } from './uiState.js'
 import { Icon, ICONS } from './icons.js'
 import { apiFetch } from './api.js'
+import { addToast } from './Toast.js'
+import { accountRequest } from './SessionAccount.js'
 import { PathInput } from './PathInput.js'
 import { DirectoryCreationOption } from './DirectoryCreationOption.js'
 import { displayLabelForTool, resolveCreateSessionPickerTools } from './pickerTools.js'
@@ -22,6 +24,8 @@ export function CreateSessionDialog() {
   const ctx = open || { groupPath: '', groupName: '', defaultPath: '', tool: '', modelId: '' }
 
   const [title, setTitle] = useState('')
+  const [slots, setSlots] = useState([]), [account, setAccount] = useState(''), [slotError, setSlotError] = useState(false)
+  const sending = useRef(false)
   const [tool, setTool] = useState('claude')
   const [modelId, setModelId] = useState('')
   const [customModel, setCustomModel] = useState('')
@@ -63,10 +67,21 @@ export function CreateSessionDialog() {
   // WEB-P0-4 prevention layer: when mutations are disabled (server
   // webMutations=false), do not render the dialog at all. Hooks order is
   // preserved by placing this guard AFTER all useState calls.
+  useEffect(() => {
+    setSlots([]); setAccount(''); setSlotError(false)
+    if (!open || !['claude','codex'].includes(tool)) return
+    const ctrl = new AbortController()
+    accountRequest('slots?' + new URLSearchParams({tool}), undefined, ctrl.signal)
+      .then(data => { if (!ctrl.signal.aborted) setSlots(data.slots) })
+      .catch(() => { if (!ctrl.signal.aborted) setSlotError(true) })
+    return () => ctrl.abort()
+  }, [!!open,tool])
   if (!mutationsEnabledSignal.value) return null
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (sending.current) return
+    sending.current = true
     setError(null)
     setSubmitting(true)
     try {
@@ -79,7 +94,9 @@ export function CreateSessionDialog() {
       const modelId = selectedModelId()
       if (modelId) payload.modelId = modelId
       if (effectiveEffort) payload.reasoningEffort = effectiveEffort
-      const { sessionId } = await apiFetch('POST', '/api/sessions', payload)
+      const { sessionId, startPending } = account ? await accountRequest('create-session', { ...payload, slot:account })
+        : await apiFetch('POST', '/api/sessions', payload)
+      if (startPending) addToast('会话已创建，启动结果待核对。请在聊天中查看状态。', 'info')
       selectSession(sessionId)
       activeTabSignal.value = 'terminal'
       createSessionDialogSignal.value = null
@@ -87,6 +104,7 @@ export function CreateSessionDialog() {
       setDirectoryCreation(null)
       setError(err.message)
     } finally {
+      sending.current = false
       setSubmitting(false)
     }
   }
@@ -95,6 +113,7 @@ export function CreateSessionDialog() {
   // its suggestions and moves the pressed button before pointerup arrives.
   function selectTool(nextTool) {
     setTool(nextTool)
+    setAccount(''); setSlots([])
     setModelId('')
     setCustomModel('')
     setReasoningEffort('')
@@ -158,6 +177,10 @@ export function CreateSessionDialog() {
               </div>
             `}
           </div>
+          ${['claude','codex'].includes(tool) && html`<div class="field"><label for="create-account">账号</label>
+            <select id="create-account" value=${account} onChange=${e => setAccount(e.currentTarget.value)}>
+              <option value="">默认账号（跟随配置）</option>${slots.map(name => html`<option key=${name} value=${name}>${name}</option>`)}
+            </select>${slotError && html`<small role="alert">账号列表读取失败，可重新打开窗口。</small>`}</div>`}
           ${modelIDs.length > 0 && html`
             <div class="field">
               <label>模型 ID</label>

@@ -2,6 +2,7 @@
 import argparse
 import configparser
 import errno
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,8 @@ import pwd
 import shutil
 import subprocess
 import sys
+import tempfile
+import re
 
 ROOT = Path(__file__).resolve().parent
 LOGIN = {'claude': ['auth', 'login'], 'codex': ['login']}
@@ -18,6 +21,53 @@ def deck(*args):
     binary = os.environ.get('AGENT_DECK_BIN') or shutil.which('agent-deck') or str(Path.home()/'.local/bin/agent-deck')
     output = subprocess.check_output([binary, *args, '--json'], timeout=20, stderr=subprocess.DEVNULL)
     return json.loads(output)
+
+def parse_config(text):
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib
+        except ImportError:
+            from pip._vendor import tomli as tomllib
+    return tomllib.loads(text)
+
+def add_slot(tool, name, existing=False):
+    if not re.fullmatch(r'[^\W_][\w.-]{0,47}', name) or name.casefold() == 'default':
+        raise ValueError('账号名须以字母、汉字或数字开头，最多 48 字，不能使用 default。')
+    file = Path(deck('config', 'get', 'claude.config_dir')['path']).resolve()
+    file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    slots = {item['name']:item['config_dir'] for item in deck('accounts', '--harness', tool)}
+    directory = default_dir(tool, slots) if existing else Path.home()/'.local/share/q-agent/accounts'/tool/name
+    with open(str(file) + '.lock', 'a', opener=lambda p, f: os.open(p, f, 0o600)) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        original = file.read_bytes() if file.exists() else b''
+        config = parse_config(original.decode('utf-8'))
+        if tool in config.get('profiles', {}).get(name, {}):
+            raise ValueError('此助手已存在同名账号配置。')
+        profiles = deck('profile', 'list')
+        if name == profiles.get('default_profile') or name in {row['name'] for row in profiles.get('profiles') or []}:
+            raise ValueError('此名称已用于 Agent Deck 会话配置，请换一个账号名。')
+        # Append a single TOML table, preserving comments and all original bytes.
+        table = '\n[profiles.' + json.dumps(name, ensure_ascii=False) + '.' + tool + ']\nconfig_dir = ' + json.dumps(str(directory), ensure_ascii=False) + '\n'
+        replacement = original + table.encode('utf-8')
+        parse_config(replacement.decode('utf-8'))
+        if existing:
+            if not directory.is_dir():
+                raise ValueError('默认账号目录尚不存在，请先登录。')
+        else:
+            directory.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            directory.mkdir(mode=0o700)
+        try:
+            with tempfile.NamedTemporaryFile(dir=file.parent, delete=False) as tmp:
+                try:
+                    tmp.write(replacement); tmp.flush(); os.fsync(tmp.fileno())
+                    os.replace(tmp.name, file)
+                finally:
+                    Path(tmp.name).unlink(missing_ok=True)
+        except BaseException:
+            if not existing: directory.rmdir()
+            raise
 
 def default_dir(tool, slots):
     variable = os.environ.get(CONFIG_ENV[tool])
@@ -35,14 +85,7 @@ def default_dir(tool, slots):
         file = Path(setting['path'])
         configured = ''
         if file.is_file():
-            try:
-                import tomllib
-            except ImportError:
-                try:
-                    import tomli as tomllib
-                except ImportError:
-                    from pip._vendor import tomli as tomllib
-            configured = tomllib.loads(file.read_text(encoding='utf-8')).get('codex', {}).get('config_dir', '')
+            configured = parse_config(file.read_text(encoding='utf-8')).get('codex', {}).get('config_dir', '')
     return Path(configured).expanduser() if configured else Path.home()/('.' + tool)
 
 def login_target(tool, slot):
@@ -85,12 +128,23 @@ def open_login(tool, slot):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['open', 'interactive'])
+    parser.add_argument('action', choices=['open', 'interactive', 'add'])
     parser.add_argument('tool', choices=list(LOGIN))
     parser.add_argument('--slot', default='')
+    parser.add_argument('--bind-default', action='store_true')
     parser.add_argument('--binary')
     parser.add_argument('--directory')
     args = parser.parse_args()
+    if args.action == 'add':
+        try:
+            add_slot(args.tool, args.slot, args.bind_default)
+        except FileExistsError:
+            sys.exit('账号目录已存在，请换一个账号名。')
+        except ValueError as error:
+            # Only return our fixed validation errors, never a config parser exception.
+            if type(error) is ValueError: sys.exit(str(error))
+            raise
+        return 0
     if args.action == 'open':
         open_login(args.tool, args.slot)
         return 0
