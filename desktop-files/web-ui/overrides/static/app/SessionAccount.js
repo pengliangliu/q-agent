@@ -10,7 +10,11 @@ export async function accountRequest(route, body, signal) {
     const response = await fetch('/desktop/accounts/' + route, { method:body ? 'POST' : 'GET', signal,
       headers:authHeaders({'X-AgentDeck-Desktop':'1'}), ...(body ? {body:JSON.stringify(body)} : {}) })
     const data = await response.json()
-    if (!response.ok || data.error) throw new Error(data.error || '账号操作未完成。')
+    if (!response.ok || data.error) {
+      const error = new Error(data.error || '账号操作未完成。')
+      error.status = response.status; error.data = data
+      throw error
+    }
     return data
   } finally { release?.() }
 }
@@ -51,7 +55,8 @@ export function SessionAccount({sessionId, tool, observedAccount, running, disab
       }
       const result = await accountRequest('switch',{sessionId,tool,slot:target,from:data.account,...(confirmation ? {interruptTurn:confirmation} : {})})
       if (result.success && alive.current) {
-        setNotice(result.continuationUnconfirmed ? t('账号已切换，接续投递尚未确认，请查看对话和原回执。','Account switched. Check the chat for continuation status.') :
+        setNotice(result.destinationPending ? t('账号已绑定，原生会话启动结果待核对，请刷新。','Account assigned. Refresh to check the native session startup.') :
+          result.continuationUnconfirmed ? t('账号已切换，接续投递尚未确认，请查看对话和原回执。','Account switched. Check the chat for continuation status.') :
           result.continuation ? t('账号已切换，已提交接续消息。','Account switched. Continuation submitted.') :
           result.onStart ? t('已绑定，下次启动时使用。','Account assigned for the next start.') : t('已切换账号。','Account switched.'))
         onSwitch(result)

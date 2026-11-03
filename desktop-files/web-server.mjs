@@ -13,6 +13,7 @@ import { handleCommand } from './command-backend.mjs';
 import { handleModel } from './model-controls.mjs';
 import { handleTerminal } from './terminal-backend.mjs';
 import { handleAccountSessions } from './account-sessions.mjs';
+import { handleAccountBatch } from './account-batches.mjs';
 import { resolveMessagePath } from './message-paths.mjs';
 import { handleCompletion } from './completion-status.mjs';
 import { handleQuota } from './chat-quota.mjs';
@@ -66,9 +67,9 @@ async function bodyJSON(req) {
   return JSON.parse(data);
 }
 
-async function session(id) {
+async function session(id, profile = '') {
   if (typeof id !== 'string' || !/^[a-zA-Z0-9-]+$/.test(id)) throw new Error('请选择有效会话。');
-  const { stdout } = await exec(deck, ['session', 'show', id, '--json'], { timeout: 20000, maxBuffer: 1024 * 1024 });
+  const { stdout } = await exec(deck, [...(profile ? ['-p',profile] : []), 'session', 'show', id, '--json'], { timeout: 20000, maxBuffer: 1024 * 1024 });
   const row = JSON.parse(stdout);
   if (row.id !== id || !row.path) throw new Error('会话不存在。');
   if (/\b(ssh|mosh|docker|podman)\b/.test(`${row.command} ${row.wrapper}`)) throw new Error('此功能用于本机项目。');
@@ -85,6 +86,7 @@ async function bridge(args) {
 
 async function desktop(req, res, url) {
   const context = { session, reply, bodyJSON, exec, deck, uploads, queuedSender };
+  if (await handleAccountBatch(req, res, url, context)) return;
   if (await handleAccountSessions(req, res, url, context)) return;
   if (url.pathname === '/desktop/accounts' || url.pathname === '/desktop/accounts/login') {
     if (req.headers['x-agentdeck-desktop'] !== '1') return reply(res, 403, { error: 'local-ui-required' });

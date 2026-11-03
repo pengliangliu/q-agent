@@ -108,11 +108,12 @@ function withoutDimHint(raw) {
   return result.trim();
 }
 
-export function nativeComposer(tool, content, expected = null) {
+export function nativeComposer(tool, content, expected = null, { allowBusy = false } = {}) {
   const raw = String(content || '').split('\n'), lines = raw.map(clean);
   const glyph = tool === 'claude' ? '❯' : '›';
   const index = lines.findLastIndex(line => new RegExp('^\\s*' + glyph + '(?:\\s|$)').test(line));
-  if (index < 0 || lines.slice(-70).some(line => /esc to interrupt|Queued follow-up inputs|^\s*ctrl\+x ctrl\+s to send now\s*$/i.test(line))) return false;
+  if (index < 0 || lines.slice(-70).some(line => (!allowBusy && /esc to interrupt/i.test(line)) ||
+      /Queued follow-up inputs|^\s*ctrl\+x ctrl\+s to send now\s*$/i.test(line))) return false;
   const next = (lines[index + 1] || '').trim();
   if (tool === 'claude' ? !/^─{5,}/.test(next) : next !== '') return false;
   const value = lines[index].slice(lines[index].indexOf(glyph) + 1).trim();

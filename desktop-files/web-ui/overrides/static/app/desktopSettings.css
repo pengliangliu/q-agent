@@ -32,3 +32,11 @@
 .desktop-diagnostics-actions button { font-size: 12px; }
 .desktop-diagnostics-actions button:disabled { opacity: .45; cursor: default; }
 @media (max-width: 560px) { .desktop-settings-backdrop { padding: 12px; } .desktop-settings-panel > header, .desktop-settings-panel > footer { padding: 18px; } .desktop-settings-body { padding: 0 18px; } .desktop-settings-row { gap: 14px; align-items: flex-start; } .desktop-settings-row select { flex-basis: 125px; width: 125px; } .desktop-settings-panel > footer { flex-wrap: wrap; } }
+.account-batch { margin-top: 10px; }
+.account-batch-panel { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.account-batch-panel header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.account-batch-list { max-height: 260px; overflow: auto; }
+.account-batch-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.account-batch-item > span { min-width: 0; overflow-wrap: anywhere; }
+.account-batch-item small { display: block; margin-top: 4px; }
+.account-batch-item input[type="checkbox"] { flex: none; width: auto; margin-top: 4px; }

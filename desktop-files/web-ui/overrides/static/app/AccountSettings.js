@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { authHeaders } from './api.js'
 import { readOnlySignal } from './state.js'
 import { ManualLogin } from './ManualLogin.js'
+import { AccountBatch } from './AccountBatch.js'
+import { defaultAccountsSignal, setDefaultAccount } from './desktopPreferences.js'
 
 export function AccountSettings({ en }) {
   const [open, setOpen] = useState(false)
@@ -71,6 +73,7 @@ export function AccountSettings({ en }) {
       ${accounts.map(row => {
         const slot = row.slots.find(s => s.name === selected[row.tool])
         const signedIn = slot ? slot.loggedIn : row.loggedIn
+        const defaultAccount = defaultAccountsSignal.value[row.tool] || ''
         return html`<div key=${row.tool}><div class="desktop-settings-row"><span><strong>${row.tool === 'claude' ? 'Claude Code' : 'Codex'}</strong>
           <small>${row.unavailable ? t('状态读取失败', 'Status unavailable') : !row.installed ? t('尚未安装', 'Not installed') : !row.loginSupported ? t('请在终端运行已配置的自定义登录命令', 'Run your custom login command in a terminal') :
             signedIn === true ? t('已检测到登录', 'Login detected') : signedIn === false ? t('未检测到登录', 'No login detected') : t('登录状态待核对', 'Login status unknown')}</small></span>
@@ -79,6 +82,13 @@ export function AccountSettings({ en }) {
             <option value="">${t('默认账号', 'Default account')}</option>${row.slots.map(s => html`<option key=${s.name} value=${s.name}>${s.name}</option>`)}</select>`}
           <button type="button" disabled=${readOnlySignal.value || !row.installed || !row.loginSupported || !!manual || !!busy || loading}
             onClick=${() => login(row.tool, slot?.name || '')}>${busy === row.tool ? t('处理中…', 'Working…') : t('登录 / 切换账号', 'Sign in / switch')}</button></div>
+          <label class="desktop-settings-row"><span>${t('新建会话默认账号','Default account for new chats')}</span>
+            <select aria-label=${row.tool + t(' 新会话默认账号',' default account for new chats')} value=${defaultAccount}
+              disabled=${readOnlySignal.value || loading} onChange=${event => setDefaultAccount(row.tool,event.currentTarget.value)}>
+              <option value="">${t('原生默认账号','Native default account')}</option>
+              ${defaultAccount && !row.slots.some(slot => slot.name === defaultAccount) && html`<option value=${defaultAccount}>${defaultAccount} · ${t('未找到','Unavailable')}</option>`}
+              ${row.slots.map(slot => html`<option key=${slot.name} value=${slot.name}>${slot.name}</option>`)}
+            </select></label>
           ${manual?.tool === row.tool ? html`<${ManualLogin} tool=${manual.tool} slot=${manual.slot} en=${en}
             onDone=${refresh} onClose=${() => setManual(null)}/>` : html`<button type="button" disabled=${!!manual || readOnlySignal.value || !row.installed || !row.loginSupported || !!busy || loading}
             onClick=${() => { setAdding(''); setNotice(''); setManual({tool:row.tool,slot:slot?.name || ''}) }}>${t('手动网页登录','Manual web sign-in')}</button>`}
@@ -91,7 +101,9 @@ export function AccountSettings({ en }) {
             <button type="button" disabled=${!!busy} onClick=${() => setAdding('')}>${t('取消', 'Cancel')}</button>
             ${addError && html`<span role="alert">${addError}</span>`}</form>`
           : html`<button type="button" disabled=${!!manual || !!busy || readOnlySignal.value} onClick=${() => { setAdding(row.tool); setName(''); setBindDefault(false); setAddError(''); setNotice('') }}>
-            ${t('添加账号', 'Add account')}</button>`}</div>`
+            ${t('添加账号', 'Add account')}</button>`}
+          ${row.tool === 'codex' && html`<${AccountBatch} target=${slot?.name || ''} en=${en}
+            disabled=${!!manual || !!busy || loading}/>`}</div>`
       })}
       <div class="desktop-diagnostics-actions"><button type="button" disabled=${loading} onClick=${() => { setNotice(''); refresh() }}>
         ${loading ? t('正在读取…', 'Checking…') : t('刷新登录状态', 'Refresh login status')}</button></div>

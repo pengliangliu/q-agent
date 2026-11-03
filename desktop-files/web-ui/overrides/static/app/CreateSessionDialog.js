@@ -12,6 +12,7 @@ import { Icon, ICONS } from './icons.js'
 import { apiFetch, authHeaders } from './api.js'
 import { addToast } from './Toast.js'
 import { accountRequest } from './SessionAccount.js'
+import { defaultAccountsSignal } from './desktopPreferences.js'
 import { PathInput } from './PathInput.js'
 import { DirectoryCreationOption } from './DirectoryCreationOption.js'
 import { displayLabelForTool, resolveCreateSessionPickerTools } from './pickerTools.js'
@@ -25,6 +26,7 @@ export function CreateSessionDialog() {
 
   const [title, setTitle] = useState('')
   const [slots, setSlots] = useState([]), [account, setAccount] = useState(''), [slotError, setSlotError] = useState(false)
+  const [slotsLoading,setSlotsLoading] = useState(false)
   const sending = useRef(false)
   const [tool, setTool] = useState('claude')
   const [modelId, setModelId] = useState('')
@@ -69,12 +71,14 @@ export function CreateSessionDialog() {
   // webMutations=false), do not render the dialog at all. Hooks order is
   // preserved by placing this guard AFTER all useState calls.
   useEffect(() => {
-    setSlots([]); setAccount(''); setSlotError(false)
+    setSlots([]); setAccount(defaultAccountsSignal.value[tool] || ''); setSlotError(false)
     if (!open || !['claude','codex'].includes(tool)) return
+    setSlotsLoading(true)
     const ctrl = new AbortController()
     accountRequest('slots?' + new URLSearchParams({tool}), undefined, ctrl.signal)
       .then(data => { if (!ctrl.signal.aborted) setSlots(data.slots) })
       .catch(() => { if (!ctrl.signal.aborted) setSlotError(true) })
+      .finally(() => { if (!ctrl.signal.aborted) setSlotsLoading(false) })
     return () => ctrl.abort()
   }, [!!open,tool])
   useEffect(() => {
@@ -139,7 +143,7 @@ export function CreateSessionDialog() {
   // its suggestions and moves the pressed button before pointerup arrives.
   function selectTool(nextTool) {
     setTool(nextTool)
-    setAccount(''); setSlots([])
+    setAccount(defaultAccountsSignal.value[nextTool] || ''); setSlots([])
     setModelId('')
     setCustomModel('')
     setReasoningEffort('')
@@ -163,7 +167,8 @@ export function CreateSessionDialog() {
   const effectiveEffort = reasoningEfforts.some(e => e.value === reasoningEffort) ? reasoningEffort : ''
   const needsCustomModel = modelId === CUSTOM_MODEL
   const staleSelection = modelId && !needsCustomModel && !modelIDs.some(model => model.value === modelId)
-  const submitDisabled = submitting || !title || !path || staleSelection || (needsCustomModel && !customModel.trim())
+  const accountUnavailable = account && (slotsLoading || slotError || !slots.includes(account))
+  const submitDisabled = submitting || !title || !path || staleSelection || accountUnavailable || (needsCustomModel && !customModel.trim())
 
   return html`
     <div class="overlay path-dialog-overlay" onClick=${handleBackdropClick}>
@@ -210,8 +215,11 @@ export function CreateSessionDialog() {
           </div>
           ${['claude','codex'].includes(tool) && html`<div class="field"><label for="create-account">账号</label>
             <select id="create-account" value=${account} onChange=${e => setAccount(e.currentTarget.value)}>
-              <option value="">默认账号（跟随配置）</option>${slots.map(name => html`<option key=${name} value=${name}>${name}</option>`)}
-            </select>${slotError && html`<small role="alert">账号列表读取失败，可重新打开窗口。</small>`}</div>`}
+              <option value="">默认账号（跟随配置）</option>
+              ${account && !slots.includes(account) && html`<option value=${account}>${account}</option>`}
+              ${slots.map(name => html`<option key=${name} value=${name}>${name}</option>`)}
+            </select>${slotError && html`<small role="alert">账号列表读取失败，可重新打开窗口。</small>`}
+            ${accountUnavailable && !slotsLoading && !slotError && html`<small role="alert">默认配置的账号已不存在，请重新选择账号。</small>`}</div>`}
           ${(modelIDs.length > 0 || scoped || loadingCatalog) && html`
             <div class="field">
               <label>模型 ID</label>

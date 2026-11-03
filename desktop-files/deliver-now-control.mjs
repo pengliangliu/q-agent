@@ -113,8 +113,8 @@ function noInteractiveMenu(row, pane) {
     !/Enter to select|Esc to cancel|enter (?:select|default).*esc back|Review your answers|Do you want to proceed\?/.test(cleanPane(pane).split('\n').slice(-60).join('\n'));
 }
 function emptyComposer(row, pane) {
-  const raw = String(pane || '').replace(/esc to interrupt/gi, 'interrupt shortcut');
-  return nativeComposer(row.tool, raw) && !/queued|to send now|ctrl\+x.*ctrl\+s/i.test(cleanPane(pane).split('\n').slice(-20).join('\n'));
+  return nativeComposer(row.tool, pane, null, { allowBusy:true }) &&
+    !/queued|to send now|ctrl\+x.*ctrl\+s/i.test(cleanPane(pane).split('\n').slice(-20).join('\n'));
 }
 
 export function interruptibleCodex(row, pane) {

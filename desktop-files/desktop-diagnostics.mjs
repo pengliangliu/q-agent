@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 // A bounded deployment fingerprint, not a recursive scan on each settings read.
 const versionFiles = ['web-server.mjs', 'desktop-diagnostics.mjs', 'chat-backend.mjs', 'command-backend.mjs',
-  'model-controls.mjs', 'chat-history.py', 'message-paths.mjs', 'output-files.mjs', 'web-ui/overrides/desktop-ui.js', 'web-ui/overrides/sw.js',
+  'model-controls.mjs', 'account-batches.mjs', 'chat-history.py', 'message-paths.mjs', 'output-files.mjs', 'web-ui/overrides/desktop-ui.js', 'web-ui/overrides/sw.js',
   ...['main.js', 'AppShell.js', 'Topbar.js', 'Sidebar.js', 'ChatPanel.js', 'SessionModelControls.js', 'CommandResult.js',
-    'InlinePrompt.js', 'CompletionNotifications.js', 'DesktopSettings.js', 'AccountSettings.js', 'SessionAccount.js', 'DiagnosticsSettings.js', 'desktopPreferences.js',
+    'InlinePrompt.js', 'CompletionNotifications.js', 'DesktopSettings.js', 'AccountSettings.js', 'AccountBatch.js', 'SessionAccount.js', 'DiagnosticsSettings.js', 'desktopPreferences.js',
     'uiOperations.js', 'OutputFiles.js', 'outputFileReferences.js', 'outputFiles.css', 'chat.css', 'project.css', 'codex-theme.css', 'desktopSettings.css']
     .map(name => 'web-ui/overrides/static/app/' + name)];
 const versionCache = new Map();
