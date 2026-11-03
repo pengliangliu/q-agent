@@ -1,10 +1,11 @@
 import path from 'node:path';
-import fs from 'node:fs/promises';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { acquireNativeControl, hasPendingSend, nativeComposer } from './native-controls.mjs';
 import { manualLogin } from './manual-login.mjs';
-import { send } from './chat-backend.mjs';
-import { interruptibleCodex, officialSendLock } from './deliver-now-control.mjs';
+import { send, invalidateChatSession } from './chat-backend.mjs';
+import { interruptibleCodex } from './deliver-now-control.mjs';
+import { switchLocalCodex } from './codex-local.mjs';
 
 const helper = fileURLToPath(new URL('./account-login.py', import.meta.url));
 const tools = ['claude', 'codex'];
@@ -45,34 +46,6 @@ async function codexTurn(api,row) {
     codexTurnOnly:true, tool:'codex', path:row.transcript_path, nativeId:row.codex_session_id, codexHome:row.resolved_codex_home,
   })],{timeout:8000});
   return JSON.parse(stdout);
-}
-async function codexDestinationReady(api,row,home) {
-  if (!home || row.resolved_codex_home !== home || !row.tmux_session) return false;
-  try {
-    const { stdout } = await api.exec('tmux',['-L',row.tmux_socket_name || 'agent-deck','list-panes',
-      '-t',row.tmux_session+':0','-F','#{pane_pid}'],{timeout:3000,maxBuffer:16384});
-    const root = Number(stdout.trim().split('\n')[0]);
-    if (!Number.isSafeInteger(root) || root < 2) return false;
-    const pending = [root];
-    for (let count = 0; pending.length && count < 64; count++) {
-      const pid = pending.shift(), proc = '/proc/'+pid;
-      try {
-        const before = await fs.readFile(proc+'/stat','utf8');
-        const executable = await fs.readlink(proc+'/exe');
-        if (path.basename(executable) === 'codex') {
-          const env = (await fs.readFile(proc+'/environ','utf8')).split('\0');
-          const args = (await fs.readFile(proc+'/cmdline','utf8')).split('\0');
-          const after = await fs.readFile(proc+'/stat','utf8');
-          const start = text => text.slice(text.lastIndexOf(')')+1).trim().split(/\s+/)[19];
-          if (start(before) === start(after) && env.includes('CODEX_HOME='+home) &&
-              args.includes('resume') && args.includes(row.codex_session_id)) return true;
-        }
-        const children = await fs.readFile(proc+'/task/'+pid+'/children','utf8');
-        pending.push(...children.trim().split(/\s+/).map(Number).filter(n => Number.isSafeInteger(n) && n > 1));
-      } catch { /* A process may exit while the native switch is starting. */ }
-    }
-  } catch { /* Retry while the native pane is starting. */ }
-  return false;
 }
 async function endedCodexTurn(api,row,confirmation) {
   if (row.tool !== 'codex' || row.codex_session_id !== confirmation.nativeId ||
@@ -131,43 +104,6 @@ async function continueSwitchedTurn(api,actual,confirmation,targetHome) {
     row = await api.session(actual.id);
   } while (Date.now() < deadline);
   throw new Error('destination not ready');
-}
-
-async function switchWithRecovery(api,args,row,confirmation) {
-  try { return await native(api,args,120000); }
-  catch (error) {
-    let result;
-    try { result = JSON.parse(error.stdout || '{}'); } catch {}
-    const message = typeof result?.error === 'string' ? result.error : '';
-    const paddingRefusal = row.tool === 'codex' && message.startsWith('exact Codex source preflight failed:') &&
-      message.includes('validate context artifact') && /invalid character '(?:\\x00|\\u0000)'/.test(message);
-    if (!paddingRefusal) {
-      if (message.includes('validate context artifact')) throw new Error('对话历史包含无法自动恢复的数据，原生切换已停止。');
-      if (/destination.*(?:newer|diverg|conflict)|different.*destination/i.test(message)) {
-        throw new Error('目标账号中已有不同版本的这条对话，请先核对目标会话。');
-      }
-      throw error;
-    }
-    // The native refusal occurs before its first durable switch boundary.
-    // Repair only NUL-only padding, then retry this exact request once.
-    const request = {deck:api.deck,sessionId:row.id,nativeId:row.codex_session_id,account:rowAccount(row),
-      profile:row.profile || '',sendLock:await officialSendLock(row.id)};
-    let recovered;
-    try {
-      const { stdout } = await api.exec('/usr/bin/python3',[path.join(path.dirname(helper),'repair-codex-padding.py'),JSON.stringify(request)],
-        {timeout:60000,maxBuffer:16384});
-      recovered = JSON.parse(stdout);
-    } catch { throw new Error('历史文件的自动恢复未完成，请刷新当前会话后重试。'); }
-    if (recovered.repaired !== true) throw new Error('历史记录无法按空字节填充方式恢复，原生切换已停止。');
-    const fresh = await api.session(row.id);
-    if (fresh.tool !== row.tool || fresh.codex_session_id !== row.codex_session_id || fresh.tmux_session !== row.tmux_session ||
-        rowAccount(fresh) !== rowAccount(row) || (await busy(fresh) && !(confirmation && await endedCodexTurn(api,fresh,confirmation)))) {
-      throw new Error('历史填充已恢复，当前回合或账号已变化，请刷新后重新切换。');
-    }
-    const pane = await native(api,[...prefix(fresh),'session','output',row.id,'--pane','--primary']);
-    if (!pane.success || !nativeComposer(row.tool,pane.content)) throw new Error('历史填充已恢复，请先处理当前输入框中的草稿或确认。');
-    return native(api,args,120000);
-  }
 }
 export async function handleAccountSessions(req, res, url, api) {
   const route = url.pathname;
@@ -235,8 +171,8 @@ export async function handleAccountSessions(req, res, url, api) {
     if (get) {
       let label = account;
       if (!account && choices.length) {
-        const info = await preview(api, row, '');
-        const inherited = choices.filter(c => c.config_dir === info.source_account_dir);
+        const source = tool === 'codex' ? row.resolved_codex_home : (await preview(api,row,'')).source_account_dir;
+        const inherited = choices.filter(c => c.config_dir === source);
         if (inherited.length === 1) label = inherited[0].name;
       }
       return reply(200, {account, label, slots:choices.map(c => c.name)});
@@ -254,10 +190,12 @@ export async function handleAccountSessions(req, res, url, api) {
       if (!harness.accounts?.some(entry => entry.name === body.slot && entry.logged_in === true)) {
         return reply(409, {error:'目标账号尚未检测到登录，请先在设置的账号管理中完成授权。'});
       }
-      const info = await preview(api,fresh,body.slot);
-      if (info.refusal || info.source_tool !== tool || info.target_harness !== tool || info.source_account !== body.from || info.target_account !== body.slot ||
-          info.capability !== 'native-resume' || info.execution !== 'supported') return reply(409,{error:'原生程序无法安全恢复此对话，切换已停止。'});
-      if (!info.source_session_id || !(tool === 'codex' ? fresh.codex_session_id : fresh.claude_session_id)) {
+      const target = choices.find(item => item.name === body.slot);
+      const info = tool === 'codex' ? {source_session_id:fresh.codex_session_id,
+        target_account_dir:target.config_dir.replace(/^~(?=\/|$)/,os.homedir())} : await preview(api,fresh,body.slot);
+      if (tool !== 'codex' && (info.refusal || info.source_tool !== tool || info.target_harness !== tool || info.source_account !== body.from || info.target_account !== body.slot ||
+          info.capability !== 'native-resume' || info.execution !== 'supported')) return reply(409,{error:'原生程序无法安全恢复此对话，切换已停止。'});
+      if (tool !== 'codex' && (!info.source_session_id || !fresh.claude_session_id)) {
         return reply(409,{error:'此会话尚未记录原生对话 ID，请先启动并完成一轮对话。'});
       }
       let resume = false;
@@ -288,39 +226,16 @@ export async function handleAccountSessions(req, res, url, api) {
       }
       const args = [...prefix(fresh),'session','switch',fresh.id,'--to-harness',tool,'--no-settle'];
       if (body.slot) args.push('--to-account='+body.slot);
-      let result;
-      try { result = await switchWithRecovery(api,args,latest,confirmation); }
-      catch (error) {
-        const known = ['对话历史包含无法自动恢复的数据，原生切换已停止。','目标账号中已有不同版本的这条对话，请先核对目标会话。',
-          '历史文件的自动恢复未完成，请刷新当前会话后重试。','历史记录无法按空字节填充方式恢复，原生切换已停止。',
-          '历史填充已恢复，当前回合或账号已变化，请刷新后重新切换。','历史填充已恢复，请先处理当前输入框中的草稿或确认。'];
-        if (known.includes(error.message)) return reply(409,{error:error.message});
-        throw error;
-      }
+      const result = tool === 'codex' ? await switchLocalCodex(api,latest,body.slot,info.target_account_dir,hasPane,native) : await native(api,args,120000);
+      invalidateChatSession(fresh.id);
       let actual = await api.session(fresh.id);
       const onStart = result.status === 'pending' && result.pending === true && result.restarted === false && result.destination_ready === false;
-      const pendingRestart = tool === 'codex' && result.status === 'pending' && result.pending === true && result.restarted === true;
       if (result.id !== fresh.id || result.new_account !== body.slot || rowAccount(actual) !== body.slot ||
-          actual.tool !== tool || !(result.success || onStart || pendingRestart)) return reply(409,{error:'切换结果待核对，请查看当前账号和会话状态。'});
-      if (pendingRestart) {
-        const deadline = Date.now()+20000;
-        let ready = false;
-        do {
-          if (actual.account !== body.slot || actual.codex_session_id !== latest.codex_session_id || ['error','stopped'].includes(actual.status)) break;
-          ready = await codexDestinationReady(api,actual,info.target_account_dir);
-          if (ready) break;
-          await new Promise(resolve => setTimeout(resolve,500));
-          actual = await api.session(fresh.id);
-        } while (Date.now() < deadline);
-        if (rowAccount(actual) !== body.slot || actual.codex_session_id !== latest.codex_session_id) {
-          return reply(409,{error:'目标账号或对话已被其他操作改变，请刷新核对。'});
-        }
-        if (!ready) return reply(200,{success:true,account:rowAccount(actual),destinationPending:true,continuationUnconfirmed:resume});
-      }
+          actual.tool !== tool || !(result.success || onStart)) return reply(409,{error:'切换结果待核对，请查看当前账号和会话状态。'});
       if (resume) {
         let continuation;
         try {
-          if (result.restarted !== true || !(result.destination_ready || pendingRestart) || actual.codex_session_id !== confirmation.nativeId) throw new Error('not ready');
+          if (result.restarted !== true || !result.destination_ready || actual.codex_session_id !== confirmation.nativeId) throw new Error('not ready');
           continuation = await continueSwitchedTurn(api,actual,confirmation,info.target_account_dir);
         } catch { return reply(200,{success:true,account:rowAccount(actual),continuationUnconfirmed:true}); }
         return reply(200,{success:true,account:rowAccount(actual),continuation,onStart,

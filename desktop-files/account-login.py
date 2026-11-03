@@ -33,6 +33,38 @@ def parse_config(text):
             from pip._vendor import tomli as tomllib
     return tomllib.loads(text)
 
+
+def trust_folder(directory=None, project=None):
+    file = Path(directory) / 'config.toml' if directory else Path(deck('config', 'get', 'claude.config_dir')['path'])
+    table = 'projects.' + json.dumps(project, ensure_ascii=False) if project else 'security'
+    key, value = ('trust_level', '"trusted"') if project else ('auto_trust_folders', 'true')
+    file.parent.mkdir(parents=True, exist_ok=True)
+    with open(str(file) + '.lock', 'a', opener=lambda p, f: os.open(p, f, 0o600)) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        original = file.read_text() if file.exists() else ''
+        config = parse_config(original)
+        entry = config.get('projects', {}).get(project, {}) if project else config.get('security', {})
+        if entry.get(key) == ('trusted' if project else True):
+            return
+        header = re.search(r'(?m)^\[\s*' + re.escape(table) + r'\s*\][^\n]*(?:\n|$)', original)
+        setting = key + ' = ' + value + '\n'
+        if header:
+            end = re.search(r'(?m)^\s*\[', original[header.end():])
+            stop = header.end() + end.start() if end else len(original)
+            section = original[header.end():stop]
+            pattern = r'(?m)^\s*' + key + r'\s*=[^\n]*(?:\n|$)'
+            section = re.sub(pattern, setting, section, count=1) if re.search(pattern, section) else setting + section
+            updated = original[:header.end()] + section + original[stop:]
+        else:
+            updated = original.rstrip() + '\n\n[' + table + ']\n' + setting
+        parse_config(updated)
+        with tempfile.NamedTemporaryFile(dir=file.parent, delete=False) as tmp:
+            try:
+                tmp.write(updated.encode('utf-8')); tmp.flush(); os.fsync(tmp.fileno())
+                os.replace(tmp.name, file)
+            finally:
+                Path(tmp.name).unlink(missing_ok=True)
+
 def add_slot(tool, name, existing=False):
     if not re.fullmatch(r'[^\W_][\w.-]{0,47}', name) or name.casefold() == 'default':
         raise ValueError('账号名须以字母、汉字或数字开头，最多 48 字，不能使用 default。')
@@ -217,13 +249,20 @@ def open_login(tool, slot):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['open', 'interactive', 'manual', 'add', 'status', 'models'])
+    parser.add_argument('action', choices=['open', 'interactive', 'manual', 'add', 'status', 'models', 'trust-folders', 'trust-project'])
     parser.add_argument('tool', choices=list(LOGIN))
     parser.add_argument('--slot', default='')
     parser.add_argument('--bind-default', action='store_true')
     parser.add_argument('--binary')
     parser.add_argument('--directory')
+    parser.add_argument('--project')
     args = parser.parse_args()
+    if args.action in ('trust-folders', 'trust-project'):
+        if args.action == 'trust-project' and (args.tool != 'codex' or not args.directory or not args.project or
+                not Path(args.directory).is_absolute() or not Path(args.project).is_absolute()):
+            raise ValueError('absolute Codex home and project paths required')
+        trust_folder(args.directory, args.project)
+        return 0
     if args.action in ('status', 'models'):
         result = account_status(args.tool) if args.action == 'status' else native_models(args.tool, args.slot, args.directory)
         print(json.dumps(result))

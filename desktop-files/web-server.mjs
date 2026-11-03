@@ -14,6 +14,7 @@ import { handleModel } from './model-controls.mjs';
 import { handleTerminal } from './terminal-backend.mjs';
 import { handleAccountSessions } from './account-sessions.mjs';
 import { handleAccountBatch } from './account-batches.mjs';
+import { localCodexHistory } from './codex-local.mjs';
 import { resolveMessagePath } from './message-paths.mjs';
 import { handleCompletion } from './completion-status.mjs';
 import { handleQuota } from './chat-quota.mjs';
@@ -73,7 +74,7 @@ async function session(id, profile = '') {
   const row = JSON.parse(stdout);
   if (row.id !== id || !row.path) throw new Error('会话不存在。');
   if (/\b(ssh|mosh|docker|podman)\b/.test(`${row.command} ${row.wrapper}`)) throw new Error('此功能用于本机项目。');
-  return row;
+  return localCodexHistory(row);
 }
 
 async function bridge(args) {

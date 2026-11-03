@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { codexApprovalPrompt as approvalPrompt, claudePrompt, pendingClaudeRequest, pendingCodexRequest, publicPrompt,
   validateClaudeAnswer, answerClaudePrompt, claudeQuestionResult } from './prompt-adapter.mjs';
-import { acquireNativeControl, sendVerifiedMenuKey } from './native-controls.mjs';
+import { acquireNativeControl, sendVerifiedMenuKey, hasPendingSend, nativeComposer } from './native-controls.mjs';
 import { deliverNow, deliverNowInfo } from './deliver-now.mjs';
 import { codexQueuedInput as nativeQueuedInput, deliveryIdentity } from './deliver-now-control.mjs';
 import { nativeSuggestion } from './native-suggestions.mjs';
@@ -20,6 +20,10 @@ const controls = new Map();
 const starts = new Map();
 const activeSends = new Set();
 const activeResponses = new Set();
+export function invalidateChatSession(id) {
+  sessions.delete(id);
+  prompts.delete(id);
+}
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9-]{8,100}$/.test(value);
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const questionMessages = {
@@ -327,7 +331,8 @@ async function continuationState(data, meta, api) {
 
 async function observeSentMessage(data, meta, api) {
   if (data.send_id !== meta.sendId || data.session_id !== meta.sessionId ||
-      !['typed', 'submitted'].includes(data.state) || typeof data.message !== 'string') return {};
+      !(['typed', 'submitted'].includes(data.state) || data.direct &&
+        (data.state === 'unknown' || data.delivery === 'typed_not_submitted')) || typeof data.message !== 'string') return {};
   const created = typeof (data.sent_at || data.created_at) === 'string' ? Date.parse(data.sent_at || data.created_at) : NaN;
   if (!Number.isFinite(created)) return {};
   const row = await cachedSession(meta.sessionId, api);
@@ -488,9 +493,17 @@ export async function send(body, api, expected = null) {
   const messageFile = file + '.message';
   try {
     await fsp.writeFile(messageFile, message, { flag: 'wx', mode: 0o600 });
-    const result = await cli(api, row, ['session', 'send', row.id, '--queue', '--json', '--no-tag',
+    let freshComposer = false;
+    if (row.tool === 'codex' && !row.transcript_path && !await hasPendingSend(row)) {
+      const pane = await cli(api, row, ['session','output',row.id,'--pane','--primary','--json']);
+      freshComposer = pane.success && nativeComposer('codex',pane.content);
+    }
+    const result = await cli(api, row, ['session', 'send', row.id,
+      ...(freshComposer ? ['--no-wait','--codex-composer-fallback'] : ['--queue']), '--json', '--no-tag',
       '--require-input-prompt', '--message-file', messageFile]);
     record = { ...record, ...result };
+    if (freshComposer) Object.assign(record,{direct:true,session_id:row.id,message,created_at:record.createdAt,reason:result.reason || result.error || '',
+      state:['typed_not_submitted','queued'].includes(result.delivery) ? 'typed' : result.success === false ? 'failed' : result.submitted ? 'submitted' : 'unknown'});
     await saveReceipt(file, record);
     if (identifier(result.send_id)) {
       await saveReceipt(path.join(receipts, `send-${result.send_id}.json`),
@@ -591,7 +604,15 @@ export async function handleChat(req, res, url, api) {
           status: 'unknown', clientId, sendId: null, requestActive: null, canStopTracking: false,
           reason: '尚未找到原发送回执，请保留原消息并再次查询。' });
         id = saved.send_id || saved.sendId;
-        if (!identifier(id)) return respond(200, sendResult(saved, { clientId }));
+        if (!identifier(id)) {
+          if (saved.direct && saved.state === 'failed' && saved.delivery === 'typed_not_submitted') saved.state = 'typed';
+          const observed = saved.direct ? await observeSentMessage(saved,{sessionId},api).catch(() => ({})) : {};
+          if (observed.observedInHistory && saved.state !== 'landed') {
+            Object.assign(saved,{success:true,state:'landed',settled:true,reason:'',error:'',landed_row_id:observed.observedMessageId});
+            await saveReceipt(path.join(receipts,hash(`${sessionId}:${clientId}`)+'.json'),saved);
+          }
+          return respond(200, sendResult(saved, { clientId, ...observed }));
+        }
       }
       if (!identifier(id)) throw new Error('发送回执标识无效。');
       const meta = { ...JSON.parse(await fsp.readFile(path.join(receipts, `send-${id}.json`), 'utf8')), sendId: id };

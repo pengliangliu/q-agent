@@ -36,6 +36,7 @@ for name in names:
 if (root / 'web-ui/overrides').exists():
     shutil.copytree(root / 'web-ui/overrides', backup / 'overrides')
 shutil.copytree(source / 'web-ui/overrides', root / 'web-ui/overrides', dirs_exist_ok=True)
+subprocess.run(['/usr/bin/python3', str(root / 'account-login.py'), 'trust-folders', 'codex'], check=True)
 
 def systemd_quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'

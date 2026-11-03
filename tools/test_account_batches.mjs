@@ -10,7 +10,8 @@ const execute=promisify(execFile), rows=new Map(), counts={interrupt:0,switch:0,
 let allowed=true;
 for (const [n,status] of [['one','running'],['two','waiting'],['draft','waiting'],['three','stopped']]) {
  const nativeId='beef0000-0000-0000-0000-'+String(rows.size+1).padStart(12,'0');
- const trace=path.join(temp,'rollout-'+nativeId+'.jsonl');
+ const trace=path.join(temp,'sessions/2026/01/01/rollout-'+nativeId+'.jsonl');
+ await fs.mkdir(path.dirname(trace),{recursive:true});
  await fs.writeFile(trace,JSON.stringify({type:'event_msg',payload:{type:'task_started',turn_id:nativeId}})+'\n');
  rows.set(n,{id:'fixture-'+n,tool:'codex',title:n,profile:'fixture',status,account:'a',codex_session_id:nativeId,
   transcript_path:trace,tmux_session:'fixture-'+n,resolved_codex_home:temp,path:temp,queue:[]});
@@ -26,11 +27,11 @@ const api={
   let v;
   if(argv[0]==='list')v=[...rows.values()];
   else if(argv[0]==='harness')v={accounts:[{name:'b',logged_in:true}]};
-  else if(argv[0]==='accounts')v=[{name:'a'},{name:'b'}];
-  else if(argv[1]==='switch-preview')v={source_tool:'codex',target_harness:'codex',source_account:row.account,target_account:'b',source_session_id:row.codex_session_id,capability:'native-resume',execution:'supported',target_account_dir:temp};
+  else if(argv[0]==='accounts')v=[{name:'a',config_dir:temp},{name:'b',config_dir:path.join(temp,'b')}];
   else if(argv[1]==='output')v={success:true,session_id:row.id,content:row.title==='draft'?'› operator draft\n\n':row.status==='running'?'• Working (\x1b[2mesc\x1b[22m to interrupt)\n›\n\n':'›\n\n'};
   else if(argv[1]==='send-keys'){counts.interrupt++;row.status='waiting';await fs.appendFile(row.transcript_path,JSON.stringify({type:'event_msg',payload:{type:'turn_aborted',turn_id:row.codex_session_id,reason:'interrupted'}})+'\n');v={success:true}}
-  else if(argv[1]==='switch'){counts.switch++;if(hold)await hold;row.account='b';v={id:row.id,new_account:'b',success:true,restarted:true,destination_ready:true}}
+  else if(argv[1]==='set'){if(argv[3]==='account'){counts.switch++;if(hold)await hold;row.account=argv[4];row.resolved_codex_home=path.join(temp,argv[4])}else if(argv[3]==='wrapper')row.wrapper=argv[4];else throw Error('unexpected setting');v={success:true}}
+  else if(argv[1]==='restart')v={success:true}
   else if(argv[1]==='send'){counts.send++;v={success:true,send_id:'fixture-send-00001',state:'queued'}}
   else throw Error('unexpected native call');
   return {stdout:JSON.stringify(v)};
