@@ -4,6 +4,7 @@ import { effect, signal } from '@preact/signals'
 import { tweaksOpenSignal } from './uiState.js'
 import { languageSignal, themeSignal, completionEnabledSignal, setLanguage, setTheme, setCompletionEnabled } from './desktopPreferences.js'
 import { DiagnosticsSettings } from './DiagnosticsSettings.js'
+import { AccountSettings } from './AccountSettings.js'
 
 export const desktopSettingsOpenSignal = signal(false)
 
@@ -72,6 +73,7 @@ export function DesktopSettings() {
           <small>${en ? 'Show in-app alerts and unread reply markers.' : '在应用内显示完成提示和未读标记。'}</small></span>
           <input class="desktop-settings-switch" type="checkbox" role="switch" aria-label=${en ? 'Reply completion alerts' : '回复完成提示'}
             checked=${completionEnabledSignal.value} onChange=${event => setCompletionEnabled(event.currentTarget.checked)} /></label>
+        <${AccountSettings} en=${en}/>
         <${DiagnosticsSettings}/>
       </div>
       <footer><button type="button" onClick=${() => { close(); tweaksOpenSignal.value = true

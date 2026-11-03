@@ -84,6 +84,31 @@ async function bridge(args) {
 
 async function desktop(req, res, url) {
   const context = { session, reply, bodyJSON, exec, deck, uploads, queuedSender };
+  if (url.pathname === '/desktop/accounts' || url.pathname === '/desktop/accounts/login') {
+    if (req.headers['x-agentdeck-desktop'] !== '1') return reply(res, 403, { error: 'local-ui-required' });
+    const providers = ['claude', 'codex'];
+    if (url.pathname === '/desktop/accounts' && req.method === 'GET') {
+      const accounts = await Promise.all(providers.map(async tool => {
+        try {
+          const { stdout } = await exec(deck, ['harness', 'status', tool, '--json'], { timeout: 20000 });
+          const info = JSON.parse(stdout);
+          const slots = info.accounts.map(item => ({ name: item.name, loggedIn: item.logged_in }));
+          const loginSupported = info.login_command === (tool === 'claude' ? 'claude auth login' : 'codex login');
+          return { tool, installed: info.installed, loginSupported, loggedIn: slots.length ? null : info.logged_in, slots };
+        } catch { return { tool, unavailable: true, slots: [] }; }
+      }));
+      return reply(res, 200, { accounts });
+    }
+    if (url.pathname !== '/desktop/accounts/login' || req.method !== 'POST') return reply(res, 405, { error: 'method-not-allowed' });
+    const body = await bodyJSON(req);
+    if (!providers.includes(body?.tool) || typeof body.slot !== 'string' || body.slot.length > 128 || /[\x00-\x1f]/.test(body.slot)) {
+      return reply(res, 400, { error: 'invalid-account' });
+    }
+    try {
+      await exec('/usr/bin/python3', [path.join(root, 'account-login.py'), 'open', body.tool, '--slot=' + body.slot], { timeout: 60000 });
+      return reply(res, 200, { opened: true });
+    } catch { return reply(res, 409, { error: 'native-login-unavailable' }); }
+  }
   if (await handleDiagnostics(req, res, url, context)) return;
   if (await handleOutputFiles(req, res, url, context)) return;
   if (await handleCompletion(req, res, url, context)) return;

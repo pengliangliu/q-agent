@@ -27,6 +27,7 @@ backup = root / 'backups' / ('web-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'
 backup.mkdir(parents=True)
 names = [file.name for file in source.iterdir() if file.suffix in {'.mjs', '.py', '.json'} and not file.name.startswith('install')]
 names.append('install-claude-statusline.py')
+names.append('account-terminal.ps1')
 for name in names:
     target = root / name
     if target.exists():

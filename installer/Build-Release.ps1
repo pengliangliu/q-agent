@@ -56,7 +56,7 @@ $files = @(
 )
 $files += $clientNames | ForEach-Object { 'desktop-client/dist/' + $_ }
 $files += @(
-    'agent-deck-files.py', 'chat-backend.mjs', 'chat-history.py', 'chat-quota.mjs',
+    'account-login.py', 'account-terminal.ps1', 'agent-deck-files.py', 'chat-backend.mjs', 'chat-history.py', 'chat-quota.mjs',
     'claude-slash-commands.json', 'claude-statusline.py', 'codex-slash-commands.json',
     'codex-suggestions.mjs', 'command-backend.mjs', 'completion-status.mjs',
     'deliver-now-control.mjs', 'deliver-now.mjs', 'desktop-diagnostics.mjs',
@@ -74,7 +74,7 @@ $files += @(
     'ChatPanel.js', 'ChatQuota.js', 'codex-theme.css', 'codexLayout.js', 'CommandResult.js',
     'completionNotifications.css', 'CompletionNotifications.js', 'CreateSessionDialog.js',
     'DesktopAttachments.js', 'desktopPreferences.js', 'desktopSettings.css',
-    'DesktopSettings.js', 'DiagnosticsSettings.js', 'icon.css', 'InlinePrompt.js',
+    'AccountSettings.js', 'DesktopSettings.js', 'DiagnosticsSettings.js', 'icon.css', 'InlinePrompt.js',
     'main.js', 'NativeTerminalPanel.js', 'outputFileReferences.js', 'outputFiles.css',
     'OutputFiles.js', 'paneRegistry.js', 'project.css', 'ProjectActions.js',
     'ProjectDialog.js', 'SessionModelControls.js', 'Sidebar.js', 'SlashCommandMenu.js', 'slashCommandPolicy.js',

@@ -11,7 +11,7 @@ if [[ "$phase" == "system" ]]; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get -o DPkg::Lock::Timeout=120 update
     apt-get -o DPkg::Lock::Timeout=120 install -y --no-upgrade --no-install-recommends \
-        python3 tmux curl ca-certificates git xz-utils systemd dbus-user-session gnupg libstdc++6
+        python3 python3-tomli tmux curl ca-certificates git xz-utils systemd dbus-user-session gnupg libstdc++6
     printf '%s\n' '{"ok":true,"phase":"system"}'
 elif [[ "$phase" == "configure-systemd" || "$phase" == "user" || "$phase" == "check" ]]; then
     command -v python3 >/dev/null || { echo 'Install system dependencies first.' >&2; exit 1; }
