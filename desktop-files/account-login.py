@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import re
+import shlex
 
 ROOT = Path(__file__).resolve().parent
 LOGIN = {'claude': ['auth', 'login'], 'codex': ['login']}
@@ -101,9 +102,21 @@ def login_target(tool, slot):
         raise ValueError('custom login command')
     return binary, directory
 
+def wsl_distribution():
+    distro = os.environ.get('WSL_DISTRO_NAME')
+    if not distro:
+        # Older systemd user services don't inherit WSL_DISTRO_NAME. The
+        # Windows path for this instance's Linux root names the same distro.
+        root = subprocess.check_output(['wslpath', '-w', '/'], text=True, timeout=5).rstrip('\r\n')
+        match = re.fullmatch(r'\\\\(?:wsl\.localhost|wsl\$)\\([^\\/]+)\\?', root, re.IGNORECASE)
+        distro = match.group(1) if match else ''
+    if not re.fullmatch(r'[^\x00-\x1f"\\/-][^\x00-\x1f"\\/]*', distro):
+        raise ValueError('invalid WSL distribution')
+    return distro
+
 def open_login(tool, slot):
     binary, directory = login_target(tool, slot)
-    payload = dict(distro=os.environ['WSL_DISTRO_NAME'], user=pwd.getpwuid(os.getuid()).pw_name,
+    payload = dict(distro=wsl_distribution(), user=pwd.getpwuid(os.getuid()).pw_name,
                    helper=str(ROOT/'account-login.py'), tool=tool, binary=str(binary), directory=str(directory))
     env = os.environ.copy()
     if not Path(env.get('WSL_INTEROP', '/nonexistent')).exists():
@@ -128,7 +141,7 @@ def open_login(tool, slot):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['open', 'interactive', 'add'])
+    parser.add_argument('action', choices=['open', 'interactive', 'manual', 'add'])
     parser.add_argument('tool', choices=list(LOGIN))
     parser.add_argument('--slot', default='')
     parser.add_argument('--bind-default', action='store_true')
@@ -148,9 +161,12 @@ def main():
     if args.action == 'open':
         open_login(args.tool, args.slot)
         return 0
-    if not sys.stdin.isatty():
-        raise ValueError('interactive terminal required')
-    binary, directory = Path(args.binary), Path(args.directory)
+    if args.action == 'manual':
+        binary, directory = login_target(args.tool, args.slot)
+    else:
+        if not sys.stdin.isatty():
+            raise ValueError('interactive terminal required')
+        binary, directory = Path(args.binary), Path(args.directory)
     if not binary.is_absolute() or not directory.is_absolute():
         raise ValueError('native path required')
     os.environ[CONFIG_ENV[args.tool]] = str(directory)
@@ -159,6 +175,13 @@ def main():
         os.environ['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = str(directory)
     os.environ['PATH'] = str(Path.home()/'.local/bin') + ':' + os.environ.get('PATH', '/usr/bin:/bin')
     os.chdir(Path.home())
+    if args.action == 'manual':
+        command = [str(binary), *LOGIN[args.tool]]
+        if args.tool == 'codex': command.append('--device-auth')
+        os.environ.update(BROWSER='/bin/false', SHELL='/bin/sh', TERM='dumb', NO_COLOR='1')
+        # script provides the real CLI's interactive prompt. Disable input echo
+        # and send its typescript to /dev/null, including on authentication error.
+        os.execv('/usr/bin/script', ['script','-qef','-E','never','-c','exec ' + shlex.join(command),'/dev/null'])
     status = subprocess.call([str(binary), *LOGIN[args.tool]])
     print('登录流程已结束，请返回 Q-agent 刷新账号状态。' if status == 0 else '登录未完成，请查看上方的原生提示。')
     try:

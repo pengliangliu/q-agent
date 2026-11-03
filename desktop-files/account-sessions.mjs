@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireNativeControl, nativeComposer } from './native-controls.mjs';
+import { manualLogin } from './manual-login.mjs';
 
 const helper = fileURLToPath(new URL('./account-login.py', import.meta.url));
 const tools = ['claude', 'codex'];
@@ -38,13 +39,21 @@ function busy(row) {
 }
 export async function handleAccountSessions(req, res, url, api) {
   const route = url.pathname;
+  const manual = /^\/desktop\/accounts\/manual\/(start|status|submit|cancel)$/.exec(route)?.[1];
   const get = ['/desktop/accounts/slots','/desktop/accounts/current'].includes(route);
-  if (!get && !['/desktop/accounts/add','/desktop/accounts/create-session','/desktop/accounts/switch'].includes(route)) return false;
+  if (!manual && !get && !['/desktop/accounts/add','/desktop/accounts/create-session','/desktop/accounts/switch'].includes(route)) return false;
   const reply = (code, data) => { api.reply(res,code,data); return true; };
   if (req.headers['x-agentdeck-desktop'] !== '1' || req.method !== (get ? 'GET' : 'POST')) return reply(403,{error:'请从本机账号管理界面操作。'});
   try {
     const body = get ? Object.fromEntries(url.searchParams) : await api.bodyJSON(req);
-    if (!get && (await upstream(req,'/api/settings')).webMutations !== true) return reply(403,{error:'当前界面为只读。'});
+    if (!get && manual !== 'status' && manual !== 'cancel' && (await upstream(req,'/api/settings')).webMutations !== true) return reply(403,{error:'当前界面为只读。'});
+    if (manual) {
+      try { return reply(200, manualLogin(manual,body)); }
+      catch (error) {
+        const allowed = ['login-busy','invalid-account','login-expired','not-waiting-for-code','invalid-code'];
+        return reply(409,{error:allowed.includes(error.message) ? error.message : 'manual-login-unavailable'});
+      }
+    }
     const tool = body.tool;
     if (!tools.includes(tool)) return reply(400,{error:'请选择 Claude 或 Codex。'});
     if (route.endsWith('/add')) {
