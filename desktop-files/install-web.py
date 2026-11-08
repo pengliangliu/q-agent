@@ -27,6 +27,7 @@ backup = root / 'backups' / ('web-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'
 backup.mkdir(parents=True)
 names = [file.name for file in source.iterdir() if file.suffix in {'.mjs', '.py', '.json'} and not file.name.startswith('install')]
 names.append('install-claude-statusline.py')
+names.append('install-provider-trust.py')
 names.append('account-terminal.ps1')
 for name in names:
     target = root / name
@@ -36,7 +37,7 @@ for name in names:
 if (root / 'web-ui/overrides').exists():
     shutil.copytree(root / 'web-ui/overrides', backup / 'overrides')
 shutil.copytree(source / 'web-ui/overrides', root / 'web-ui/overrides', dirs_exist_ok=True)
-subprocess.run(['/usr/bin/python3', str(root / 'account-login.py'), 'trust-folders', 'codex'], check=True)
+subprocess.run(['/usr/bin/python3', str(root / 'install-provider-trust.py')], check=True)
 
 def systemd_quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'

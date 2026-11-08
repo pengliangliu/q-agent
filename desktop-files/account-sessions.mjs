@@ -6,6 +6,7 @@ import { manualLogin } from './manual-login.mjs';
 import { send, invalidateChatSession } from './chat-backend.mjs';
 import { interruptibleCodex } from './deliver-now-control.mjs';
 import { switchLocalCodex } from './codex-local.mjs';
+import { trustProject } from './project-backend.mjs';
 
 const helper = fileURLToPath(new URL('./account-login.py', import.meta.url));
 const tools = ['claude', 'codex'];
@@ -154,6 +155,7 @@ export async function handleAccountSessions(req, res, url, api) {
       try {
         const row = await native(api,[...profile,'session','show',created.id]);
         if (row.id !== created.id || row.tool !== tool || rowAccount(row) !== body.slot) throw new Error('wrong binding');
+        await trustProject(row.path, api);
         const start = await native(api,[...profile,'session','start',row.id],90000);
         if (!start.success) throw new Error('failed to start');
       } catch { return reply(200,{sessionId:created.id,startPending:true}); }
@@ -226,6 +228,8 @@ export async function handleAccountSessions(req, res, url, api) {
       }
       const args = [...prefix(fresh),'session','switch',fresh.id,'--to-harness',tool,'--no-settle'];
       if (body.slot) args.push('--to-account='+body.slot);
+      if (tool === 'claude') await api.exec('/usr/bin/python3', [helper, 'trust-project', tool,
+        '--directory', info.target_account_dir, '--project', latest.path], { timeout: 5000 });
       const result = tool === 'codex' ? await switchLocalCodex(api,latest,body.slot,info.target_account_dir,hasPane,native) : await native(api,args,120000);
       invalidateChatSession(fresh.id);
       let actual = await api.session(fresh.id);

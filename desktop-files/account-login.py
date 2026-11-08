@@ -34,17 +34,17 @@ def parse_config(text):
     return tomllib.loads(text)
 
 
-def trust_folder(directory=None, project=None):
-    file = Path(directory) / 'config.toml' if directory else Path(deck('config', 'get', 'claude.config_dir')['path'])
-    table = 'projects.' + json.dumps(project, ensure_ascii=False) if project else 'security'
-    key, value = ('trust_level', '"trusted"') if project else ('auto_trust_folders', 'true')
+def trust_folder(directory, project):
+    file = Path(directory) / 'config.toml'
+    table = 'projects.' + json.dumps(project, ensure_ascii=False)
+    key, value = 'trust_level', '"trusted"'
     file.parent.mkdir(parents=True, exist_ok=True)
     with open(str(file) + '.lock', 'a', opener=lambda p, f: os.open(p, f, 0o600)) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         original = file.read_text() if file.exists() else ''
         config = parse_config(original)
-        entry = config.get('projects', {}).get(project, {}) if project else config.get('security', {})
-        if entry.get(key) == ('trusted' if project else True):
+        entry = config.get('projects', {}).get(project, {})
+        if entry.get(key) == 'trusted':
             return
         header = re.search(r'(?m)^\[\s*' + re.escape(table) + r'\s*\][^\n]*(?:\n|$)', original)
         setting = key + ' = ' + value + '\n'
@@ -64,6 +64,77 @@ def trust_folder(directory=None, project=None):
                 os.replace(tmp.name, file)
             finally:
                 Path(tmp.name).unlink(missing_ok=True)
+
+
+def trust_json(file, project, claude):
+    file.parent.mkdir(parents=True, exist_ok=True)
+    with open(str(file) + '.q-agent-trust.lock', 'a', opener=lambda p, f: os.open(p, f, 0o600)) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        for _ in range(4):
+            original = file.read_bytes() if file.exists() else b''
+            config = json.loads(original) if original else {}
+            if claude:
+                entry = config.setdefault('projects', {}).setdefault(project, {})
+                if entry.get('hasTrustDialogAccepted') is True:
+                    return
+                entry['hasTrustDialogAccepted'] = True
+            else:
+                if config.get(project) == 'TRUST_FOLDER':
+                    return
+                config[project] = 'TRUST_FOLDER'
+            with tempfile.NamedTemporaryFile(dir=file.parent, delete=False) as tmp:
+                try:
+                    tmp.write((json.dumps(config, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
+                    tmp.flush()
+                    os.fsync(tmp.fileno())
+                    if (file.read_bytes() if file.exists() else b'') != original:
+                        continue
+                    if file.exists():
+                        os.chmod(tmp.name, file.stat().st_mode & 0o777)
+                    os.replace(tmp.name, file)
+                    return
+                finally:
+                    Path(tmp.name).unlink(missing_ok=True)
+        raise ValueError('workspace trust configuration changed concurrently')
+
+
+def trust_workspace(project):
+    setting = deck('config', 'get', 'claude.config_dir')
+    file = Path(setting['path'])
+    config = parse_config(file.read_text(encoding='utf-8')) if file.exists() else {}
+    homes = {tool: {Path.home() / ('.' + tool)} for tool in LOGIN}
+    sections = [config]
+    for name in ('profiles', 'groups', 'conductors'):
+        sections.extend(config.get(name, {}).values())
+    for section in sections:
+        for tool in LOGIN:
+            directory = section.get(tool, {}).get('config_dir')
+            if directory:
+                homes[tool].add(Path(directory).expanduser().resolve())
+    for tool, variable in CONFIG_ENV.items():
+        if os.environ.get(variable):
+            homes[tool].add(Path(os.environ[variable]).expanduser().resolve())
+    for project in {str(Path(project).absolute()), str(Path(project).resolve())}:
+        # Claude's default launch uses the legacy home file. Explicit account
+        # config directories use their own .claude.json.
+        trust_json(Path.home() / '.claude.json', project, True)
+        for home in homes['claude']:
+            trust_json(home / '.claude.json', project, True)
+        for home in homes['codex']:
+            trust_folder(home, project)
+        gemini_home = Path(os.environ.get('GEMINI_CLI_HOME', str(Path.home()))) / '.gemini'
+        gemini_file = Path(os.environ.get('GEMINI_CLI_TRUSTED_FOLDERS_PATH', str(gemini_home / 'trustedFolders.json')))
+        trust_json(gemini_file, project, False)
+
+
+def trust_account_project(tool, directory, project):
+    directory = Path(directory).resolve()
+    if tool == 'claude':
+        trust_json(directory / '.claude.json', project, True)
+        if directory == Path.home() / '.claude':
+            trust_json(Path.home() / '.claude.json', project, True)
+    else:
+        trust_folder(directory, project)
 
 def add_slot(tool, name, existing=False):
     if not re.fullmatch(r'[^\W_][\w.-]{0,47}', name) or name.casefold() == 'default':
@@ -249,19 +320,25 @@ def open_login(tool, slot):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['open', 'interactive', 'manual', 'add', 'status', 'models', 'trust-folders', 'trust-project'])
-    parser.add_argument('tool', choices=list(LOGIN))
+    parser.add_argument('action', choices=['open', 'interactive', 'manual', 'add', 'status', 'models', 'trust-workspace', 'trust-project'])
+    parser.add_argument('tool', choices=list(LOGIN), nargs='?')
     parser.add_argument('--slot', default='')
     parser.add_argument('--bind-default', action='store_true')
     parser.add_argument('--binary')
     parser.add_argument('--directory')
     parser.add_argument('--project')
     args = parser.parse_args()
-    if args.action in ('trust-folders', 'trust-project'):
-        if args.action == 'trust-project' and (args.tool != 'codex' or not args.directory or not args.project or
-                not Path(args.directory).is_absolute() or not Path(args.project).is_absolute()):
-            raise ValueError('absolute Codex home and project paths required')
-        trust_folder(args.directory, args.project)
+    if args.action == 'trust-workspace':
+        if not args.project or not Path(args.project).is_absolute() or re.search(r'[\x00-\x1f]', args.project):
+            raise ValueError('absolute project path required')
+        trust_workspace(args.project)
+        return 0
+    if args.tool is None:
+        parser.error('tool is required')
+    if args.action == 'trust-project':
+        if not args.directory or not args.project or not Path(args.directory).is_absolute() or not Path(args.project).is_absolute():
+            raise ValueError('absolute account home and project paths required')
+        trust_account_project(args.tool, args.directory, args.project)
         return 0
     if args.action in ('status', 'models'):
         result = account_status(args.tool) if args.action == 'status' else native_models(args.tool, args.slot, args.directory)

@@ -1,5 +1,5 @@
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.0',
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.1',
     [string]$InnoCompiler = '',
     [switch]$SkipClientBuild
 )
@@ -60,7 +60,7 @@ $files += @(
     'claude-slash-commands.json', 'claude-statusline.py', 'codex-slash-commands.json',
     'codex-suggestions.mjs', 'command-backend.mjs', 'completion-status.mjs',
     'deliver-now-control.mjs', 'deliver-now.mjs', 'desktop-diagnostics.mjs',
-    'install-claude-statusline.py', 'install-web.py', 'install.py', 'message-paths.mjs',
+    'install-claude-statusline.py', 'install-provider-trust.py', 'provider-launch.py', 'install-web.py', 'install.py', 'message-paths.mjs',
     'model-controls.mjs', 'native-controls.mjs', 'native-suggestions.mjs',
     'Open-AgentDeck-Chinese.ps1', 'output-files.mjs', 'project-backend.mjs',
     'prompt-adapter.mjs', 'terminal-backend.mjs', 'web-server.mjs', 'windows-files.ps1', 'windows-proxy-stdio.py'

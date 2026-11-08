@@ -8,11 +8,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { handleChat } from './chat-backend.mjs';
-import { handleProject } from './project-backend.mjs';
+import { handleProject, trustProject } from './project-backend.mjs';
 import { handleCommand } from './command-backend.mjs';
 import { handleModel } from './model-controls.mjs';
 import { handleTerminal } from './terminal-backend.mjs';
-import { handleAccountSessions } from './account-sessions.mjs';
+import { handleAccountSessions, upstream as readUpstream } from './account-sessions.mjs';
 import { handleAccountBatch } from './account-batches.mjs';
 import { localCodexHistory } from './codex-local.mjs';
 import { resolveMessagePath } from './message-paths.mjs';
@@ -203,7 +203,17 @@ const server = http.createServer(async (req, res) => {
         return fs.createReadStream(candidate).pipe(res);
       }
     }
-    const outbound = http.request({ ...upstream, path: req.url, method: req.method, headers: proxyHeaders(req) }, response => {
+    let forwardedBody = null;
+    const headers = proxyHeaders(req);
+    if (req.method === 'POST' && url.pathname === '/api/sessions') {
+      const body = await bodyJSON(req);
+      const directory = await readUpstream(req, '/api/session-directory?path=' + encodeURIComponent(body.projectPath || ''));
+      if (!directory.missing?.length || body.createDir === true) await trustProject(directory.path, { exec });
+      forwardedBody = Buffer.from(JSON.stringify(body));
+      delete headers['transfer-encoding'];
+      headers['content-length'] = forwardedBody.length;
+    }
+    const outbound = http.request({ ...upstream, path: req.url, method: req.method, headers }, response => {
       if (req.method === 'GET' && (url.pathname === '/' || /^\/[sg]\//.test(url.pathname)) && String(response.headers['content-type']).includes('text/html')) {
         const chunks = [];
         response.on('data', chunk => chunks.push(chunk));
@@ -227,7 +237,8 @@ const server = http.createServer(async (req, res) => {
       }
     });
     outbound.on('error', () => { if (!res.headersSent) reply(res, 502, { error: '本地后端服务正在启动，请稍后刷新。' }); else res.destroy(); });
-    req.pipe(outbound);
+    if (forwardedBody) outbound.end(forwardedBody);
+    else req.pipe(outbound);
     res.on('close', () => outbound.destroy());
   } catch (error) {
     const message = error.code ? '操作未完成，请确认会话处于输入状态、文件存在且 Windows 可以访问。' : error.message;

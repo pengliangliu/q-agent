@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { isLocalWslUNC } from './message-paths.mjs';
 
 async function normalize(value, exec) {
@@ -12,6 +13,12 @@ async function normalize(value, exec) {
   if (text === '~' || text.startsWith('~/')) text = os.homedir() + text.slice(1);
   if (!path.isAbsolute(text)) throw new Error('请使用完整目录路径，例如 /home/user/projects/example。');
   return path.resolve(text);
+}
+
+export async function trustProject(value, { exec }) {
+  const folder = await normalize(value, exec);
+  await exec('/usr/bin/python3', [fileURLToPath(new URL('./account-login.py', import.meta.url)),
+    'trust-workspace', '--project', folder], { timeout: 10000 });
 }
 
 let creating = false;
@@ -65,6 +72,7 @@ export async function handleProject(req, res, url, context) {
       if (missing.some(p => !approved.has(p))) throw new Error('待创建目录发生变化，请重新确认目录列表。');
     }
     if (missing.length) await fs.mkdir(folder, { recursive: true });
+    await trustProject(folder, context);
     const receipt = JSON.parse((await exec(deck, ['group', 'create', name, ...(parentPath ? ['--parent', parentPath] : []), '--default-path', folder, '--json'], { timeout: 20000 })).stdout);
     if (receipt.success === false || receipt.error) throw new Error('项目分组创建未成功，请刷新列表核对。');
     const groupPath = receipt.path || receipt.group_path || receipt.group?.path || childPath;
