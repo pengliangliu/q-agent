@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { acquireNativeControl } from './native-controls.mjs';
 import { deliveryCLI, deliveryHash, deliveryIdentity, deliveryCapability, deliveredInTranscript,
-  officialSendLock, claudeDefaultKeys } from './deliver-now-control.mjs';
+  officialSendLock, claudeDefaultKeys, claudeQueuedInput, claudeQueueProof } from './deliver-now-control.mjs';
 
 const receipts = path.join(os.homedir(), '.local/share/agent-deck/chat-receipts');
 const helper = path.join(path.dirname(fileURLToPath(import.meta.url)), 'deliver-now-control.mjs');
@@ -27,7 +27,7 @@ async function supportedVersion(api) {
   const cached = versions.get(api.deck);
   if (cached && Date.now() - cached.time < 60000) return cached.value;
   const { stdout } = await api.exec(api.deck, ['version'], { timeout: 6000, maxBuffer: 16384 });
-  const value = /^Agent Deck v1\.16\.35(?:\s|$)/.test(stdout.trim());
+  const value = /^Agent Deck v1\.16\.(?:35|38)(?:\s|$)/.test(stdout.trim());
   versions.set(api.deck, { time: Date.now(), value });
   return value;
 }
@@ -39,8 +39,11 @@ async function snapshot(data, meta, api) {
   const output = await deliveryCLI(api, row, ['session', 'output', row.id, '--pane', '--primary', '--json']);
   if (!output.success || output.session_id !== row.id) throw new Error('无法确认原会话主终端。');
   const defaultKeys = await claudeDefaultKeys(row);
-  const gate = deliveryCapability(data, row, output.content || '', { sendId: meta.sendId,
-    identity: meta.conversationIdentity, defaultKeys });
+  const pane = output.content || '';
+  const queueProof = row.tool === 'claude' && defaultKeys && ['typed', 'submitted'].includes(data.state) &&
+    claudeQueuedInput(pane, data.message) && await claudeQueueProof(row, data.message, data.created_at);
+  const gate = deliveryCapability(data, row, pane, { sendId: meta.sendId,
+    identity: meta.conversationIdentity, defaultKeys, queueProof });
   if (gate.canDeliverNow && !await supportedVersion(api)) return { row, data, gate: { canDeliverNow: false,
     deliverNowWillInterrupt: false, deliverNowReason: 'Agent Deck 版本已变化，立即投递路径需要重新核对。' } };
   return { row, data, gate };
@@ -85,7 +88,7 @@ async function guardedAction(record, api) {
   record.keySent = record.keySent === true ? true : null; record.stage = 'native-guard'; await save(record);
   try {
     const request = { sessionId: record.sessionId, sendId: record.sendId, identity: record.identity,
-      messageHash: record.messageHash, profile: record.profile, deck: api.deck };
+      messageHash: record.messageHash, profile: record.profile, deck: api.deck, claudeNativeOnly: record.claudeNativeOnly };
     // --no-fork makes timeout terminate the lock-owning helper itself. A held
     // official send lock is refused immediately; it is never stolen or waited out.
     const { stdout } = await api.exec('/usr/bin/flock', ['--exclusive', '--nonblock', '--conflict-exit-code', '73', '--no-fork',
@@ -155,7 +158,7 @@ async function run(record, meta, api) {
   finally { await save(record); }
 }
 
-export async function deliverNow(body, meta, api) {
+export async function deliverNow(body, meta, api, { claudeNativeOnly = false } = {}) {
   if (body.sessionId !== meta.sessionId || body.sendId !== meta.sendId) return { code: 409,
     body: { success: false, sendId: meta.sendId, keySent: false, retryAllowed: true, error: '消息与当前会话不一致。' } };
   const old = await previous(meta.sendId);
@@ -171,13 +174,16 @@ export async function deliverNow(body, meta, api) {
     if (!info.canDeliverNow) return { code: info.deliverNowState === 'delivered' ? 200 : 409, body: {
       success: info.deliverNowState === 'delivered', sendId: meta.sendId, status: data.state, ...info,
       keySent: false, retryAllowed: info.deliverNowState !== 'delivered', error: info.deliverNowState === 'delivered' ? undefined : info.deliverNowReason } };
+    if (claudeNativeOnly && info.mode !== 'claude-native') return { code: 409,
+      body: { sendId: meta.sendId, status: data.state, keySent: false, retryAllowed: true } };
     const row = await api.session(meta.sessionId);
     if (!Array.isArray(meta.conversationIdentity) || deliveryHash(deliveryIdentity(row)) !== deliveryHash(meta.conversationIdentity)) return {
       code: 409, body: { success: false, sendId: meta.sendId, keySent: false, retryAllowed: true,
         deliverNowState: 'refused', deliverNowAttempted: false, error: '原生会话身份已变化，已停止投递。' } };
     const record = { sendId: meta.sendId, sessionId: meta.sessionId, profile: meta.profile, identity: [...meta.conversationIdentity],
       messageHash: deliveryHash(data.message), willInterrupt: info.deliverNowWillInterrupt, state: 'pending', stage: 'reserved',
-      keySent: false, interrupted: false, releaseRequested: false, createdAt: new Date().toISOString(), reason: '正在核对并投递原消息。' };
+      keySent: false, interrupted: false, releaseRequested: false, claudeNativeOnly,
+      createdAt: new Date().toISOString(), reason: '正在核对并投递原消息。' };
     await fs.mkdir(receipts, { recursive: true, mode: 0o700 });
     if (old) await save(record);
     else {
@@ -188,4 +194,23 @@ export async function deliverNow(body, meta, api) {
     active.set(meta.sendId, operation); started = true;
     return { code: 202, body: { success: true, sendId: meta.sendId, status: data.state, ...attemptView(record), retryAllowed: false } };
   } finally { if (!started) release(); }
+}
+
+// A new chat send can briefly be in the original worker's typing phase.
+// Retry only the preflight when it explicitly proves no action was attempted.
+export async function deliverNewMessageNow(meta, api, tool) {
+  const claude = tool === 'claude';
+  const deadline = Date.now() + 6000;
+  const retryStates = claude ? ['queued', 'typing', 'typed', 'submitted'] : ['queued', 'typing'];
+  for (let attempt = 0; attempt < (claude ? 12 : 3); attempt++) {
+    const { code, body } = await deliverNow({ sessionId: meta.sessionId, sendId: meta.sendId }, meta, api, { claudeNativeOnly: claude });
+    if (claude && code === 202) {
+      await active.get(meta.sendId);
+      const record = await previous(meta.sendId);
+      if (record?.state !== 'refused' || record.keySent !== false) return;
+    } else if (code !== 409 || !retryStates.includes(body.status) || body.keySent !== false ||
+        body.retryAllowed !== true || body.deliverNowAttempted) return;
+    if (Date.now() >= deadline) return;
+    await pause();
+  }
 }

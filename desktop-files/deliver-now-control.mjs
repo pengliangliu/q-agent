@@ -28,7 +28,7 @@ export async function deliveryCLI(api, row, args, timeout = 12000) {
   }
 }
 
-// Agent Deck v1.16.35 uses EffectiveDataPath("runtime/send-locks", "runtime")
+// Agent Deck v1.16.35 and v1.16.38 use the effective runtime send-lock directory
 // and ConfigFileLock's sibling .lock. This is the same cross-process flock,
 // not a second lock namespace; runtime source and live location were verified.
 export async function officialSendLock(sessionId) {
@@ -81,7 +81,7 @@ export function claudeQueuedInput(content, message) {
   return nativeComposer('claude', composerOnly);
 }
 
-export async function claudeQueueProof(row, message) {
+export async function claudeQueueProof(row, message, createdAt) {
   if (!row.claude_session_id || !row.transcript_path?.endsWith('.jsonl')) return false;
   const pending = [];
   try {
@@ -91,13 +91,18 @@ export async function claudeQueueProof(row, message) {
       for await (const line of reader) {
         if (!/"type"\s*:\s*"queue-operation"/.test(line)) continue;
         let event; try { event = JSON.parse(line); } catch { return false; }
-        if (event.sessionId !== row.claude_session_id) continue;
-        if (event.operation === 'enqueue' && typeof event.content === 'string') pending.push(event.content);
+        if (event.type !== 'queue-operation' || event.sessionId !== row.claude_session_id) continue;
+        if (event.operation === 'enqueue') pending.push(event);
         else if (event.operation === 'dequeue') pending.shift();
-        else return false;
+        else if (event.operation === 'popAll') pending.length = 0;
+        else if (event.operation === 'remove' && typeof event.content === 'string') {
+          const index = pending.findIndex(item => item.content === event.content);
+          if (index >= 0) pending.splice(index, 1);
+        } else return false;
       }
     } finally { reader.close(); input.destroy(); }
-    return pending.length === 1 && pending[0] === message;
+    return pending.length === 1 && pending[0].content === message &&
+      (!createdAt || Date.parse(pending[0].timestamp) >= Date.parse(createdAt));
   } catch { return false; }
 }
 
@@ -131,9 +136,14 @@ export function deliveryCapability(data, row, pane, options = {}) {
   if (data.claude_session_id && data.claude_session_id !== row.claude_session_id) return denied('原消息属于另一个 Claude 对话。');
   if (!noInteractiveMenu(row, pane)) return denied('原生会话正在等待确认，请先处理当前确认。');
   if (data.state === 'landed') return denied('原消息已经进入对话。');
-  if (data.settled === true) return denied('原回执已结束，送达结果未确认。');
   if (data.state === 'typing') return denied('原队列正在投递这条消息，请等待原回执更新。');
   if (['failed', 'cancelled'].includes(data.state)) return denied('原消息已结束，不能重新释放该回执。');
+  if (row.tool === 'claude' && ['typed', 'submitted'].includes(data.state) &&
+      options.defaultKeys && options.queueProof && claudeQueuedInput(pane, data.message)) {
+    return { canDeliverNow: true, deliverNowWillInterrupt: row.status === 'running', mode: 'claude-native',
+      deliverNowReason: '立即提交已核对的唯一原生排队消息，可能中断当前回合。' };
+  }
+  if (data.settled === true) return denied('原回执已结束，送达结果未确认。');
   const busy = row.status === 'running' && /esc to interrupt/i.test(cleanPane(pane).split('\n').slice(-70).join('\n'));
   if (row.status === 'running' && !busy && row.substate !== 'background-work') return denied('当前运行阶段尚未确认，暂不发送中断按键。');
   if (data.state === 'queued') {
@@ -147,10 +157,6 @@ export function deliveryCapability(data, row, pane, options = {}) {
   if (row.tool === 'codex' && codexQueuedInput(pane, data.message)) {
     return { canDeliverNow: true, deliverNowWillInterrupt: busy, mode: 'codex-native',
       deliverNowReason: busy ? '将中断当前回合，再提交已核对的唯一原生排队消息。' : '提交已核对的唯一原生排队消息。' };
-  }
-  if (row.tool === 'claude' && options.defaultKeys && (!options.strictQueue || options.queueProof) && claudeQueuedInput(pane, data.message)) {
-    return { canDeliverNow: true, deliverNowWillInterrupt: busy, mode: 'claude-native',
-      deliverNowReason: '立即提交已核对的唯一原生排队消息，可能中断当前回合。' };
   }
   return denied('无法确认唯一原生队列与原消息一致，请在独立终端核对。');
 }
@@ -198,11 +204,13 @@ export async function lockedDelivery(request, api) {
     if (data.send_id !== request.sendId || data.session_id !== row.id || deliveryHash(data.message) !== request.messageHash) throw new Error('原消息回执或内容已变化。');
     const output = await deliveryCLI(api, row, ['session', 'output', row.id, '--pane', '--primary', '--json']);
     if (!output.success || output.session_id !== row.id) throw new Error('无法确认原会话主终端。');
-    return { row, data, pane: output.content || '', defaultKeys: await claudeDefaultKeys(row),
-      queueProof: row.tool === 'claude' && ['typed', 'submitted'].includes(data.state) ? await claudeQueueProof(row, data.message) : false };
+    const pane = output.content || '';
+    return { row, data, pane, defaultKeys: await claudeDefaultKeys(row),
+      queueProof: row.tool === 'claude' && ['typed', 'submitted'].includes(data.state) && claudeQueuedInput(pane, data.message) &&
+        await claudeQueueProof(row, data.message, data.created_at) };
   };
   const capability = item => deliveryCapability(item.data, item.row, item.pane,
-    { sendId: request.sendId, identity: request.identity, defaultKeys: item.defaultKeys, strictQueue: true, queueProof: item.queueProof });
+    { sendId: request.sendId, identity: request.identity, defaultKeys: item.defaultKeys, queueProof: item.queueProof });
   const sendKey = async key => {
     actionStarted = true;
     const result = await deliveryCLI(api, current.row, ['session', 'send-keys', request.sessionId,
@@ -214,7 +222,9 @@ export async function lockedDelivery(request, api) {
     current = await read();
     if (current.data.state === 'landed' || await deliveredInTranscript(current.row, current.data)) return { outcome: 'delivered', keySent: false, interrupted: false };
     let gate = capability(current);
-    if (!gate.canDeliverNow) return { outcome: 'refused', keySent: false, interrupted: false, reason: gate.deliverNowReason };
+    if (!gate.canDeliverNow || request.claudeNativeOnly && gate.mode !== 'claude-native') {
+      return { outcome: 'refused', keySent: false, interrupted: false, reason: gate.deliverNowReason };
+    }
     if (gate.mode === 'interrupt-release' || (gate.mode === 'codex-native' && gate.deliverNowWillInterrupt)) {
       current = await read(); gate = capability(current);
       if (!gate.canDeliverNow || !gate.deliverNowWillInterrupt) return { outcome: 'refused', keySent: false, interrupted: false, reason: '当前回合或队列已经变化，请刷新后核对。' };

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { codexApprovalPrompt as approvalPrompt, claudePrompt, pendingClaudeRequest, pendingCodexRequest, publicPrompt,
   validateClaudeAnswer, answerClaudePrompt, claudeQuestionResult } from './prompt-adapter.mjs';
 import { acquireNativeControl, sendVerifiedMenuKey, hasPendingSend, nativeComposer } from './native-controls.mjs';
-import { deliverNow, deliverNowInfo } from './deliver-now.mjs';
+import { deliverNow, deliverNowInfo, deliverNewMessageNow } from './deliver-now.mjs';
 import { codexQueuedInput as nativeQueuedInput, deliveryIdentity } from './deliver-now-control.mjs';
 import { nativeSuggestion } from './native-suggestions.mjs';
 import { codexContextSuggestion } from './codex-suggestions.mjs';
@@ -506,8 +506,15 @@ export async function send(body, api, expected = null) {
       state:['typed_not_submitted','queued'].includes(result.delivery) ? 'typed' : result.success === false ? 'failed' : result.submitted ? 'submitted' : 'unknown'});
     await saveReceipt(file, record);
     if (identifier(result.send_id)) {
-      await saveReceipt(path.join(receipts, `send-${result.send_id}.json`),
-        { sessionId: row.id, profile: row.profile, clientId: body.clientId, receipt: file, conversationIdentity: record.conversationIdentity });
+      const meta = { sessionId: row.id, profile: row.profile, clientId: body.clientId, receipt: file,
+        conversationIdentity: record.conversationIdentity };
+      await saveReceipt(path.join(receipts, `send-${result.send_id}.json`), meta);
+      if (body.delivery === 'immediate' && (row.status === 'running' || chatActivity(row).turnRunning) &&
+          ['queued', 'typing', 'typed', 'submitted'].includes(sendResult(record).status)) {
+        // The send route must release its native control lock before the
+        // original queue item can be checked for immediate delivery.
+        setImmediate(() => deliverNewMessageNow({ ...meta, sendId: result.send_id }, api, row.tool).catch(() => {}));
+      }
     }
   } catch (error) {
     record.reason = error.message + ' 不会自动重新投递。';
@@ -567,7 +574,8 @@ export async function handleChat(req, res, url, api) {
       if (!release) return respond(409, { success: false, error: '当前会话的上一操作仍在处理。' });
       const key = `${body.sessionId}:${body.clientId}`;
       activeSends.add(key);
-      try { return respond(200, await send(body, api)); } finally { activeSends.delete(key); release(); }
+      try { return respond(200, await send({ ...body, delivery: 'immediate' }, api)); }
+      finally { activeSends.delete(key); release(); }
     }
     if (req.method === 'POST' && url.pathname === '/desktop/chat/start') {
       const body = await api.bodyJSON(req);
@@ -640,7 +648,7 @@ export async function handleChat(req, res, url, api) {
         deliverNowReason: '已在原会话记录中确认这条消息。' });
       else Object.assign(result, await deliverNowInfo(data, meta, api).catch(() => ({ canDeliverNow: false,
         deliverNowReason: '暂时无法核对原队列，请刷新后查看。' })));
-      if (result.deliverNowState === 'pending') { result.requestActive = true; result.canStopTracking = false; }
+      if (result.canDeliverNow || result.deliverNowState === 'pending') { result.requestActive = true; result.canStopTracking = false; }
       return respond(200, result);
     }
     if (req.method === 'POST' && ['/desktop/chat/interrupt', '/desktop/chat/respond'].includes(url.pathname)) {

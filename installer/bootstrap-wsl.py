@@ -18,6 +18,7 @@ import urllib.request
 
 # Official versioned releases, checked 2026-11-01. See bootstrap-sources.md.
 DECK_VERSION = "1.16.35"
+SUPPORTED_DECK_VERSIONS = (DECK_VERSION, "1.16.38")
 DECK_URL = "https://github.com/asheshgoplani/agent-deck/releases/download/v1.16.35/agent-deck_1.16.35_linux_amd64.tar.gz"
 DECK_SHA256 = "369990183649b5016d9d542efb5179a3405fa26ff24ed31aed6a4edcb2f6cdb9"
 NODE_VERSION = "v22.23.4"
@@ -287,7 +288,7 @@ def inspect():
             value = version(binary, name) if binary and name not in ("tmux", "git") else None
             compatible = bool(binary)
             if name == "agent-deck":
-                compatible = value == DECK_VERSION
+                compatible = value in SUPPORTED_DECK_VERSIONS
             if name == "node":
                 compatible = bool(value) and int(value.split(".")[0]) >= 22
             commands[name] = {"path": str(binary) if binary else None, "version": value, "ok": compatible}
@@ -304,8 +305,8 @@ def install_user(args):
     require_wsl()
     existing = {name: find_binary(name) for name in ("agent-deck", "node", "claude", "codex")}
     # Detect conflicts before downloading or changing any user launchers.
-    if existing["agent-deck"] and version(existing["agent-deck"], "agent-deck") != DECK_VERSION:
-        fail("Existing Agent Deck is not v1.16.35. It was preserved; select a clean WSL environment or resolve its version first.")
+    if existing["agent-deck"] and version(existing["agent-deck"], "agent-deck") not in SUPPORTED_DECK_VERSIONS:
+        fail("Existing Agent Deck was preserved. Supported releases are v1.16.35 and v1.16.38.")
     if existing["node"] and int(version(existing["node"], "node").split(".")[0]) < 22:
         fail("Existing Node is older than 22. It was preserved; upgrade Node or select a clean WSL environment.")
     runtime = Path.home() / ".local/share/q-agent/runtime"

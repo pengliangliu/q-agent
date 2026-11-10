@@ -1003,7 +1003,7 @@ function SessionChat({ sessionId }) {
         <button type="button" onClick=${() => queryRecovery(record)}>查询原请求</button>
         ${(record.prompt || record.needsInput) && html`<button type="button" disabled=${openingTerminal} onClick=${openTerminal}>在独立终端继续</button>`}
       </section>`)}
-      ${store.pending && html`<div class="chat-pending" role="status"><strong>${store.pending.retrySafe ? '消息未送达' : store.pending.status === 'submitting' ? '正在提交消息…' : store.pending.status === 'unknown' ? '发送结果待确认' : '消息已排队，等待会话确认'}</strong>
+      ${store.pending && html`<div class="chat-pending" role="status"><strong>${store.pending.retrySafe ? '消息未送达' : store.pending.status === 'submitting' ? '正在提交消息…' : store.pending.deliverNowState === 'pending' ? '正在立即投递…' : store.pending.status === 'unknown' ? '发送结果待确认' : '等待原会话确认消息'}</strong>
         <${MessageTime} timestamp=${store.pending.submittedAt} local=${true} />
         <p translate="no">${store.pending.text || store.pending.attachments?.map(file => file.name).join('、')}</p>
         ${store.pending.reason && html`<small>${store.pending.reason}</small>`}
@@ -1094,9 +1094,9 @@ function SessionChat({ sessionId }) {
           }} />
         <div class="chat-composer-actions"><button type="button" class="chat-attach" disabled=${readOnly || store.sending} title="添加图片或文件" aria-label="添加图片或文件" onClick=${() => fileRef.current?.click()}>＋</button>
           <input ref=${fileRef} type="file" multiple hidden onChange=${event => { addFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
-          <span class="chat-input-hint">${suggestion ? html`<span id="chat-native-suggestion-hint" class="chat-suggestion-hint">${suggestion.source === 'local-context' && html`<span>基于本轮回复</span>`}<button type="button" onClick=${acceptSuggestion} aria-label="接受下一步建议"><kbd>Tab</kbd> 接受建议</button><span>Esc 忽略 · Enter 发送</span></span>` : uploading ? '文件上传中…' : isSlashCommand ? store.files.length ? '命令不支持附件，请移除附件后执行' : 'Enter 执行命令 · / 查看可用命令' : requestIssue ? requestIssue.state === 'retrying' ? '请求正在重试，新消息将加入队列 · Enter 提交' : '回复已中断 · Enter 提交 · / 命令' : running ? '正在处理，新消息将加入队列 · Enter 提交' : 'Enter 发送 · Shift + Enter 换行 · / 命令'}</span>
+          <span class="chat-input-hint">${suggestion ? html`<span id="chat-native-suggestion-hint" class="chat-suggestion-hint">${suggestion.source === 'local-context' && html`<span>基于本轮回复</span>`}<button type="button" onClick=${acceptSuggestion} aria-label="接受下一步建议"><kbd>Tab</kbd> 接受建议</button><span>Esc 忽略 · Enter 发送</span></span>` : uploading ? '文件上传中…' : isSlashCommand ? store.files.length ? '命令不支持附件，请移除附件后执行' : 'Enter 执行命令 · / 查看可用命令' : requestIssue ? requestIssue.state === 'retrying' ? '正在重试 · Enter 立即投递，可能中断当前回复' : '回复已中断 · Enter 提交 · / 命令' : running ? 'Enter 立即投递，可能中断当前回复' : 'Enter 发送 · Shift + Enter 换行 · / 命令'}</span>
           ${running && html`<button type="button" class="chat-stop" disabled=${stopping || readOnly || store.history.canInterrupt === false} onClick=${interrupt}><span aria-hidden="true">■</span> ${stopping ? '正在停止…' : '停止生成'}</button>`}
-          <button type="submit" class="chat-send" disabled=${!canSubmitDraft} aria-label=${isSlashCommand ? '执行命令' : running ? '加入队列' : '发送消息'} title=${isSlashCommand ? '执行命令' : running ? '加入队列' : '发送消息'}>↑</button>
+          <button type="submit" class="chat-send" disabled=${!canSubmitDraft} aria-label=${isSlashCommand ? '执行命令' : running ? '立即投递' : '发送消息'} title=${isSlashCommand ? '执行命令' : running ? '立即投递，可能中断当前回复' : '发送消息'}>↑</button>
         </div></form><p class="chat-composer-footnote">支持拖入多个文件、粘贴截图 · 单个文件不超过 100 MB</p>
     </div></footer>
     ${dragging && html`<div class="chat-drop-overlay"><span>＋</span><strong>松开即可添加文件</strong><p>图片、文档或代码，可一次添加多个</p></div>`}

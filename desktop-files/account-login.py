@@ -121,7 +121,7 @@ def trust_workspace(project):
         for home in homes['claude']:
             trust_json(home / '.claude.json', project, True)
         for home in homes['codex']:
-            trust_folder(home, project)
+            trust_account_project('codex', home, project)
         gemini_home = Path(os.environ.get('GEMINI_CLI_HOME', str(Path.home()))) / '.gemini'
         gemini_file = Path(os.environ.get('GEMINI_CLI_TRUSTED_FOLDERS_PATH', str(gemini_home / 'trustedFolders.json')))
         trust_json(gemini_file, project, False)
@@ -135,6 +135,16 @@ def trust_account_project(tool, directory, project):
             trust_json(Path.home() / '.claude.json', project, True)
     else:
         trust_folder(directory, project)
+        # WSL can report a different spelling for the same Windows folder
+        # after a session restarts. Codex looks up trust by path string.
+        lowercase = project.lower()
+        if lowercase != project and re.match(r'^/mnt/[a-z]/', project):
+            try:
+                same_folder = Path(project).samefile(lowercase)
+            except OSError:
+                same_folder = False
+            if same_folder:
+                trust_folder(directory, lowercase)
 
 def add_slot(tool, name, existing=False):
     if not re.fullmatch(r'[^\W_][\w.-]{0,47}', name) or name.casefold() == 'default':

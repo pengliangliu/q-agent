@@ -59,11 +59,11 @@ def read(args):
     if completed.returncode: raise RuntimeError('command failed')
     return completed.stdout.strip()
 if not result['deck']:
-    errors.append('Agent Deck v1.16.35 is required in the selected WSL user environment.')
+    errors.append('Agent Deck v1.16.35 or v1.16.38 is required in the selected WSL user environment.')
 else:
     try:
-        if not re.fullmatch(r'Agent Deck v1\.16\.35(?: \(update available: v[^)]+\))?',read([result['deck'],'version'])):
-            errors.append('Install the supported Agent Deck release v1.16.35 before continuing.')
+        if not re.fullmatch(r'Agent Deck v1\.16\.(?:35|38)(?: \(update available: v[^)]+\))?',read([result['deck'],'version'])):
+            errors.append('Supported Agent Deck releases are v1.16.35 and v1.16.38.')
     except Exception: errors.append('Cannot verify the Agent Deck version in WSL.')
 if not result['node']:
     errors.append('Node.js 22 or newer is required in WSL.')

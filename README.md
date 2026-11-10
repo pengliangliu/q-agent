@@ -28,7 +28,7 @@
 
 ## 下载安装包
 
-从 [GitHub Releases](https://github.com/pengliangliu/q-agent/releases/latest) 下载 **Q-agent-Setup-0.1.1-windows-x64.exe**。安装包使用企鹅图标，按当前 Windows 用户安装，附带编译好的客户端，无需安装开发工具。首次运行会打开中文环境配置向导：
+从 [GitHub Releases](https://github.com/pengliangliu/q-agent/releases/latest) 下载 **Q-agent-Setup-0.1.2-windows-x64.exe**。安装包使用企鹅图标，按当前 Windows 用户安装，附带编译好的客户端，无需安装开发工具。首次运行会打开中文环境配置向导：
 
 1. **检测已有环境**：选择 WSL2 发行版和普通 Linux 用户。环境就绪时，可直接连接客户端。
 2. **没有 WSL**：点击“启用 / 安装 WSL”，按 Windows 提示授权；如需重启，保存工作并自行重启，再从开始菜单打开“Q-agent 环境设置”。点击“安装 Ubuntu 24.04”添加官方发行版。
