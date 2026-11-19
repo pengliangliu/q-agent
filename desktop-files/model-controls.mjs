@@ -470,10 +470,108 @@ async function clearModelDraft(body, api) {
   } catch (error) { release(); return { code: 409, body: { ...visibleSnapshot(state), ...requestView(record, state), error: error.message } }; }
 }
 
+const sidebarTranscriptModels = new Map();
+const sidebarModelSnapshots = new Map();
+const sidebarModelRequests = new Map();
+
+function sidebarModelId(tool, value) {
+  return typeof value === 'string' &&
+    (tool === 'claude' ? /^claude-[a-z0-9.-]{1,80}$/i : /^gpt-[a-z0-9.-]{1,80}$/i).test(value) ? value.toLowerCase() : '';
+}
+
+async function sidebarTranscriptModel(row) {
+  const file = row.transcript_path;
+  if (!file?.endsWith('.jsonl') || !path.isAbsolute(file)) return null;
+  const stat = await fs.stat(file);
+  if (!stat.isFile()) return null;
+  const cached = sidebarTranscriptModels.get(row.id);
+  if (cached?.file === file && cached.size === stat.size && cached.modified === stat.mtimeMs) return cached.model;
+  const handle = await fs.open(file, 'r');
+  let model = null;
+  try {
+    const size = Math.min(stat.size, 2 * 1024 * 1024);
+    const buffer = Buffer.alloc(size);
+    const tail = stat.size - size;
+    // A long tool trace can follow the last turn_context by several megabytes.
+    const offsets = row.tool === 'codex' && tail > 0 ? [tail, 0] : [tail];
+    for (const offset of offsets) {
+      const { bytesRead } = await handle.read(buffer, 0, size, offset);
+      const lines = buffer.subarray(0, bytesRead).toString('utf8').split('\n');
+      if (offset) lines.shift();
+      for (const line of lines.reverse()) {
+        if (!line.includes('"model"')) continue;
+        let record;
+        try { record = JSON.parse(line); } catch { continue; }
+        let modelId = '';
+        if (row.tool === 'claude' && record?.type === 'assistant' && (record.sessionId || record.session_id) === row.claude_session_id &&
+            !record.isSidechain && !record.isApiErrorMessage && !record.isMeta) {
+          modelId = sidebarModelId(row.tool, record.message?.model);
+        } else if (row.tool === 'codex' && record?.type === 'turn_context') {
+          modelId = sidebarModelId(row.tool, record.payload?.model);
+        }
+        if (modelId) {
+          model = { modelId, source: offset === tail ? 'history' : 'early-history' };
+          break;
+        }
+      }
+      if (model) break;
+    }
+  } finally { await handle.close(); }
+  sidebarTranscriptModels.set(row.id, { file, size: stat.size, modified: stat.mtimeMs, model });
+  return model;
+}
+
+async function sidebarSessionModel(row, api) {
+  if (row.tmux_session && ['running', 'waiting', 'idle'].includes(row.status)) {
+    try {
+      const { stdout } = await api.exec('tmux', ['-L', row.tmux_socket_name || 'agent-deck',
+        'capture-pane', '-p', '-t', row.tmux_session + ':0.0'], { timeout: 2500, maxBuffer: 128 * 1024 });
+      const screen = clean(stdout).split('\n').slice(-12);
+      const modelId = row.tool === 'claude'
+        ? modelCurrent('claude', screen.join('\n'), claudeModels).modelId
+        : sidebarModelId('codex', screen.map(line => line.match(/^\s*(gpt-[a-z0-9.-]+)\s+(?:default|minimal|low|medium|high|xhigh|max|ultra)\s*·/i)?.[1]).filter(Boolean).at(-1));
+      if (modelId) return { modelId, source: 'current' };
+    } catch { /* A hidden footer or a closed pane still permits history. */ }
+  }
+  return sidebarTranscriptModel(row).catch(() => null);
+}
+
+async function sidebarModels(profile, api) {
+  if (sidebarModelRequests.has(profile)) return sidebarModelRequests.get(profile);
+  const cached = sidebarModelSnapshots.get(profile);
+  if (cached && Date.now() - cached.at < 20000) return cached;
+  const request = (async () => {
+    const args = [...(profile ? ['-p', profile] : []), 'list', '--json'];
+    const { stdout } = await api.exec(api.deck, args, { timeout: 15000, maxBuffer: 4 * 1024 * 1024 });
+    const rows = JSON.parse(stdout).filter(row => !row.archived && ['claude', 'codex'].includes(row.tool));
+    const models = Object.create(null);
+    const ids = new Set(rows.map(row => row.id));
+    for (const id of sidebarTranscriptModels.keys()) if (!ids.has(id)) sidebarTranscriptModels.delete(id);
+    for (let index = 0; index < rows.length; index += 6) {
+      await Promise.all(rows.slice(index, index + 6).map(async row => {
+        const model = await sidebarSessionModel(row, api);
+        if (model) models[row.id] = model;
+      }));
+    }
+    const snapshot = { models, at: Date.now() };
+    sidebarModelSnapshots.set(profile, snapshot);
+    return snapshot;
+  })();
+  sidebarModelRequests.set(profile, request);
+  try { return await request; }
+  finally { sidebarModelRequests.delete(profile); }
+}
+
 export async function handleModel(req, res, url, api) {
-  if (!['/desktop/model-catalog', '/desktop/chat/models', '/desktop/chat/model', '/desktop/chat/model/clear-draft'].includes(url.pathname)) return false;
+  if (!['/desktop/sidebar-models', '/desktop/model-catalog', '/desktop/chat/models', '/desktop/chat/model', '/desktop/chat/model/clear-draft'].includes(url.pathname)) return false;
   const reply = (code, body) => { api.reply(res, code, body); return true; };
   try {
+    if (url.pathname === '/desktop/sidebar-models') {
+      if (req.method !== 'GET' || req.headers['x-agentdeck-desktop'] !== '1') return reply(403, { error: 'local-ui-required' });
+      const profile = url.searchParams.get('profile') || '';
+      if (profile && !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,79}$/.test(profile)) return reply(400, { error: 'invalid-profile' });
+      return reply(200, await sidebarModels(profile, api));
+    }
     if (url.pathname === '/desktop/model-catalog') {
       if (req.method !== 'GET' || req.headers['x-agentdeck-desktop'] !== '1') return reply(403, { error: 'local-ui-required' });
       const tool = url.searchParams.get('tool'), account = url.searchParams.get('slot') || '';

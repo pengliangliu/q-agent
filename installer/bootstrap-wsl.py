@@ -16,11 +16,11 @@ import tempfile
 import time
 import urllib.request
 
-# Official versioned releases, checked 2026-11-01. See bootstrap-sources.md.
-DECK_VERSION = "1.16.35"
-SUPPORTED_DECK_VERSIONS = (DECK_VERSION, "1.16.38")
-DECK_URL = "https://github.com/asheshgoplani/agent-deck/releases/download/v1.16.35/agent-deck_1.16.35_linux_amd64.tar.gz"
-DECK_SHA256 = "369990183649b5016d9d542efb5179a3405fa26ff24ed31aed6a4edcb2f6cdb9"
+# Official versioned releases. See bootstrap-sources.md.
+DECK_VERSION = "1.16.38"
+SUPPORTED_DECK_VERSIONS = ("1.16.35", DECK_VERSION)
+DECK_URL = f"https://github.com/asheshgoplani/agent-deck/releases/download/v{DECK_VERSION}/agent-deck_{DECK_VERSION}_linux_amd64.tar.gz"
+DECK_SHA256 = "f7971f893cfc0e255fb6bdd281bef2119915e832d6970f386284127b00b63536"
 NODE_VERSION = "v22.23.4"
 NODE_URL = "https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-x64.tar.xz"
 NODE_SHA256 = "1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce"
@@ -306,7 +306,7 @@ def install_user(args):
     existing = {name: find_binary(name) for name in ("agent-deck", "node", "claude", "codex")}
     # Detect conflicts before downloading or changing any user launchers.
     if existing["agent-deck"] and version(existing["agent-deck"], "agent-deck") not in SUPPORTED_DECK_VERSIONS:
-        fail("Existing Agent Deck was preserved. Supported releases are v1.16.35 and v1.16.38.")
+        fail("Existing Agent Deck was preserved. Supported releases are v" + " and v".join(SUPPORTED_DECK_VERSIONS) + ".")
     if existing["node"] and int(version(existing["node"], "node").split(".")[0]) < 22:
         fail("Existing Node is older than 22. It was preserved; upgrade Node or select a clean WSL environment.")
     runtime = Path.home() / ".local/share/q-agent/runtime"

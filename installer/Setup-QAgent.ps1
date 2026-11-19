@@ -117,9 +117,10 @@ function Start-SetupStage([string]$Name,[switch]$Elevate) {
 function Open-SetupTerminal([string]$Assistant = '') {
     $selected = [string]$distroBox.SelectedItem
     if (-not $selected) { throw '请先选择 WSL 发行版。' }
+    $wsl = Get-QAgentWslExecutable
     $args = @('-d',$selected)
     if ($Assistant -eq 'create-user') {
-        $scriptPath = (Invoke-QAgentNative 'wsl.exe' @('-d',$selected,'-u','root','--exec','wslpath','-u',(Join-Path $PSScriptRoot 'initialize-user.sh'))).stdout
+        $scriptPath = (Invoke-QAgentNative $wsl @('-d',$selected,'-u','root','--exec','wslpath','-u',(Join-Path $PSScriptRoot 'initialize-user.sh'))).stdout
         $args += @('-u','root','--exec','bash',$scriptPath)
     } elseif ($userBox.Text.Trim()) {
         if ($userBox.Text.Trim() -notmatch '^[A-Za-z0-9_.-]{1,64}$' -or $userBox.Text.Trim().StartsWith('-')) { throw 'Linux 用户名格式无效。' }
@@ -131,7 +132,7 @@ function Open-SetupTerminal([string]$Assistant = '') {
             else { 'export PATH="$HOME/.local/bin:$PATH"; exec codex login' }
         $args += @('--exec','bash','-lc',$command)
     }
-    Start-Process -FilePath 'wsl.exe' -ArgumentList (($args | ForEach-Object { ConvertTo-QAgentArgument $_ }) -join ' ') -WindowStyle Normal
+    Start-Process -FilePath $wsl -ArgumentList (($args | ForEach-Object { ConvertTo-QAgentArgument $_ }) -join ' ') -WindowStyle Normal
 }
 
 Add-SetupLabel 'Q-agent  /  配置你的本地助手环境' 0 $true | Out-Null

@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { effect, signal } from '@preact/signals'
+import { computed, effect, signal } from '@preact/signals'
 import { selectedIdSignal, selectedGroupSignal, selectSession } from './state.js'
 import { activeTabSignal } from './uiState.js'
 import { menuModelSignal } from './dataModel.js'
@@ -18,8 +18,10 @@ const armedAt = Date.now()
 let snapshotReady = false
 let previousSessions = new Map()
 let channel = null
-const nativeHost = () => window.__agentDeckDesktop?.host === 'agentdeck-winforms' && window.__agentDeckDesktop.protocol === 1 &&
-  window.__agentDeckDesktop.notifications === true && typeof window.chrome?.webview?.postMessage === 'function'
+let visibleCompletionTimer
+const desktopBridge = () => window.__agentDeckDesktop?.host === 'agentdeck-winforms' && window.__agentDeckDesktop.protocol === 1 &&
+  typeof window.chrome?.webview?.postMessage === 'function'
+const nativeHost = () => desktopBridge() && window.__agentDeckDesktop.notifications === true
 
 function readLedger() {
   try {
@@ -30,6 +32,23 @@ function readLedger() {
 }
 
 export const completionStateSignal = signal(readLedger())
+// Desktop "New session" creates a root session. A Codex worker linked to
+// a Claude parent reports to that parent through Agent Deck's native routing.
+const silentWorkerIds = computed(() => {
+  const sessions = menuModelSignal.value.sessions || []
+  const claudeParents = new Set(sessions.filter(session => session.tool === 'claude').map(session => session.id))
+  return new Set(sessions.filter(session => session.tool === 'codex' && claudeParents.has(session.parent)).map(session => session.id))
+})
+export const unreadCompletionSessionsSignal = computed(() => {
+  const unread = new Map()
+  for (const item of completionStateSignal.value.unread) {
+    if (silentWorkerIds.value.has(item.sessionId)) continue
+    unread.delete(item.sessionId)
+    unread.set(item.sessionId, item)
+  }
+  return unread
+})
+export const visibleCompletionSessionSignal = signal(null)
 const permissionSignal = signal(nativeHost() ? 'native' : typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
 const systemEnabledSignal = signal((() => { try { return localStorage.getItem(SYSTEM_KEY) !== 'false' } catch (_) { return false } })())
 const notificationErrorSignal = signal('')
@@ -81,10 +100,17 @@ function openReply(sessionId) {
 }
 
 function showToast(item) {
-  if (completionEnabledSignal.value) addToast(languageSignal.value === 'en' ? `${item.title} finished replying` : `${item.title} 回复已完成`, 'success')
+  if (!completionEnabledSignal.value) return
+  if (presence().sessionId === item.sessionId) {
+    visibleCompletionSessionSignal.value = item.sessionId
+    clearTimeout(visibleCompletionTimer)
+    visibleCompletionTimer = setTimeout(() => { visibleCompletionSessionSignal.value = null }, 5000)
+  }
+  addToast(languageSignal.value === 'en' ? `${item.title} finished replying` : `${item.title} 回复已完成`, 'success')
 }
 
 async function notifyCompletion(item) {
+  if (silentWorkerIds.value.has(item.sessionId)) return
   let delivery
   try {
     delivery = await withLedger(ledger => {
@@ -171,7 +197,7 @@ function handleBackgroundTransitions(sessions) {
 export function CompletionNotifications() {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const unread = completionStateSignal.value.unread
+  const unread = unreadCompletionSessionsSignal.value
   const permission = permissionSignal.value
   const enabled = systemEnabledSignal.value && ['granted', 'native'].includes(permission)
   const nativeStatus = nativeStatusSignal.value
@@ -223,11 +249,21 @@ export function CompletionNotifications() {
     }
     const dispose = effect(() => { selectedIdSignal.value; selectedGroupSignal.value; activeTabSignal.value; sync() })
     const disposeBackground = effect(() => handleBackgroundTransitions(menuModelSignal.value.sessions || []))
+    let lastBadgeCount
+    const disposeBadge = effect(() => {
+      const count = unreadCompletionSessionsSignal.value.size
+      if (count === lastBadgeCount || !desktopBridge() || window.__agentDeckDesktop.taskbarBadge !== true) return
+      try {
+        window.chrome.webview.postMessage({ type: 'agentdeck:completion-count', count })
+        lastBadgeCount = count
+      } catch (_) { /* The in-app count remains available. */ }
+    })
     const timer = setInterval(publishPresence, 10000)
     window.addEventListener('focus', sync); window.addEventListener('blur', sync)
     window.addEventListener('storage', storage); document.addEventListener('visibilitychange', sync)
     return () => {
-      dispose(); disposeBackground(); clearInterval(timer); channel?.postMessage({ type: 'bye', clientId }); channel?.close(); channel = null
+      dispose(); disposeBackground(); disposeBadge(); clearInterval(timer); channel?.postMessage({ type: 'bye', clientId }); channel?.close(); channel = null
+      clearTimeout(visibleCompletionTimer); visibleCompletionSessionSignal.value = null
       window.removeEventListener('focus', sync); window.removeEventListener('blur', sync)
       window.removeEventListener('storage', storage); document.removeEventListener('visibilitychange', sync)
       if (nativeHost()) window.chrome.webview.removeEventListener('message', nativeClick)
@@ -248,9 +284,9 @@ export function CompletionNotifications() {
   }
 
   return html`<div class="completion-notifications" onKeyDown=${event => { event.stopPropagation(); if (event.key === 'Escape') setOpen(false) }}>
-    <button class="icon-btn completion-toggle" type="button" aria-label=${unread.length ? `完成通知，${unread.length} 条未读` : '完成通知'} title="回复完成通知" aria-expanded=${open} onClick=${() => setOpen(value => !value)}>
+    <button class="icon-btn completion-toggle" type="button" aria-label=${unread.size ? `完成通知，${unread.size} 个会话未读` : '完成通知'} title="回复完成通知" aria-expanded=${open} onClick=${() => setOpen(value => !value)}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
-      ${unread.length > 0 && html`<span class="completion-count">${unread.length}</span>`}
+      ${unread.size > 0 && html`<span class="completion-count">${unread.size}</span>`}
     </button>
     ${open && html`<section class="completion-popover" aria-label="回复完成通知"><header><strong>回复完成通知</strong>
       <button type="button" aria-label="关闭完成通知" onClick=${() => setOpen(false)}>×</button></header>
@@ -259,7 +295,7 @@ export function CompletionNotifications() {
         ${busy ? '正在请求权限…' : permission === 'native' ? enabled ? '关闭本应用系统提醒' : '开启本应用系统提醒' : permission === 'unsupported' ? '浏览器不支持系统通知' : permission === 'denied' ? '浏览器已阻止系统通知' : enabled ? '关闭系统通知' : '开启系统通知'}</button>
         <p>${permission === 'native' ? (nativeStatusMessages[nativeStatus?.setting] || nativeStatus?.message || '正在确认 Windows 通知状态。') + ' 站内完成提示和未读列表仍可使用。' : permission === 'denied' ? '可在浏览器的网站设置中允许通知。' : '页面打开期间提醒。当前会话轻提示，后台回复加入未读列表。'}</p>
         ${notificationErrorSignal.value && html`<p role="status">${notificationErrorSignal.value}</p>`}</div>
-      ${unread.length ? html`<div class="completion-list">${[...unread].reverse().map(item => html`<button type="button" key=${item.id} class="completion-entry"
+      ${unread.size ? html`<div class="completion-list">${[...unread.values()].reverse().map(item => html`<button type="button" key=${item.id} class="completion-entry"
           onClick=${() => { openReply(item.sessionId); setOpen(false) }}><strong translate="no">${item.title}</strong><span>回复已完成 · 点击查看</span></button>`)}</div>
         <button class="completion-mark-read" type="button" onClick=${() => markRead()}>全部标为已读</button>`
         : html`<p class="completion-empty">暂无未读的完成回复</p>`}

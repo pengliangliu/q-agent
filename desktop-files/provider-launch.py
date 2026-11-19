@@ -9,7 +9,7 @@ import sys
 
 METADATA_COMMANDS = {
     'auth', 'login', 'logout', 'help', 'version', 'update', 'install', 'uninstall',
-    'doctor', 'mcp', 'debug', 'features', 'completion', 'app-server', 'exec-server',
+    'doctor', 'mcp', 'debug', 'features', 'completion', 'app-server', 'exec-server', 'agents',
 }
 
 
@@ -61,6 +61,12 @@ def prepare(tool, arguments):
         home = Path(os.environ.get(variable) or str(Path.home() / ('.' + tool))).expanduser()
         for project in folders:
             helpers['trust_account_project'](tool, home, project)
+        if tool == 'claude' and os.environ.get('AGENTDECK_INSTANCE_ID'):
+            try:
+                sync = runpy.run_path(str(Path(__file__).with_name('claude-conversation-sync.py')))
+                sync['install'](home)
+            except (OSError, ValueError, TypeError, RuntimeError):
+                pass
 
 
 def main():

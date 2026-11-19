@@ -14,11 +14,17 @@ import { slashCommandPolicy } from './slashCommandPolicy.js'
 import { CommandResult } from './CommandResult.js'
 import { OutputFiles } from './OutputFiles.js'
 import { beginUiMutation } from './uiOperations.js'
+import { updateSessionActivity, clearSessionActivity } from './sessionActivity.js'
 
 const sessions = new Map()
 const MAX_FILE_SIZE = 100 * 1024 * 1024
 const HEADER = { 'X-AgentDeck-Desktop': '1' }
 const storageKey = id => 'agentdeck.chat.' + id
+
+function recoveryKey(record) {
+  const id = record.kind === 'send' ? record.clientId || record.sendId : record.requestId
+  return id ? record.kind + ':' + id : record
+}
 
 function getSession(id) {
   if (!sessions.has(id)) {
@@ -273,6 +279,89 @@ export function ChatPanel() {
   return sessionId ? html`<${SessionChat} key=${sessionId} sessionId=${sessionId} />` : html`<${EmptyStateDashboard} />`
 }
 
+function ClaudeConversations({ sessionId, liveIdentity, projectPath, reveal, onClose }) {
+  const [selected, setSelected] = useState('')
+  const [before, setBefore] = useState('')
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [revision, setRevision] = useState(0)
+  const [opening, setOpening] = useState(false)
+  const listIdentity = selected ? '' : liveIdentity
+
+  function open(id) {
+    setResult(null)
+    setBefore('')
+    setSelected(id)
+  }
+
+  async function resume() {
+    setOpening(true)
+    setError('')
+    try {
+      const data = await request('/desktop/chat/resume-conversation', { sessionId, nativeId: selected })
+      onClose()
+      selectSession(data.sessionId)
+    } catch (error) { setError(error.message) }
+    finally { setOpening(false) }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const params = new URLSearchParams({ sessionId })
+    if (selected) params.set('nativeId', selected)
+    if (before) params.set('before', before)
+    setLoading(true)
+    setError('')
+    request('/desktop/chat/conversations?' + params, undefined, controller.signal).then(data => {
+      if (controller.signal.aborted) return
+      setResult(previous => before && previous
+        ? { ...data, messages: [...data.messages, ...previous.messages] }
+        : data)
+    }).catch(error => {
+      if (!controller.signal.aborted) setError(error.message)
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
+  }, [sessionId, selected, before, revision, listIdentity])
+
+  useEffect(() => {
+    if (selected) return
+    const refresh = () => setRevision(value => value + 1)
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [selected])
+
+  return html`<section class="chat-panel" aria-label="Claude 终端对话">
+    <header class="chat-header"><div class="chat-header-info">
+      <div class="chat-title-line"><strong>${selected ? '查看终端对话' : 'Claude 终端对话'}</strong>
+        ${selected && html`<span class="chat-state">只读</span>`}</div>
+      </div><div class="chat-header-actions">
+        ${selected && result && !readOnlySignal.value && html`<button type="button" class="chat-terminal-button" disabled=${opening} onClick=${resume}>继续此对话</button>`}
+        ${selected ? html`<button type="button" class="chat-terminal-button" onClick=${() => open('')}>返回列表</button>`
+          : html`<button type="button" class="chat-terminal-button" disabled=${loading} onClick=${() => setRevision(value => value + 1)}>刷新</button>`}
+        <button type="button" class="chat-terminal-button" onClick=${onClose}>返回当前聊天</button>
+      </div></header>
+    ${error && html`<div class="chat-banner error" role="alert"><span>${error}</span><button type="button" onClick=${() => setRevision(value => value + 1)}>重试</button></div>`}
+    <div class="chat-scroll"><div class="chat-thread">
+      ${loading && !result && html`<p class="chat-history-notice" role="status">正在读取终端对话…</p>`}
+      ${!selected && result && html`<section class="chat-location-choices" aria-label="本项目的 Claude 对话">
+        <button type="button" onClick=${onClose}>当前终端 · 继续聊天</button>
+        ${result.conversations.filter(item => item.id !== result.currentId).map(item => html`<button type="button" key=${item.id} onClick=${() => open(item.id)}>
+          对话记录 · ${new Date(item.modifiedAt).toLocaleString()} · ${item.id.slice(-8)}
+        </button>`)}
+      </section>`}
+      ${selected && result && html`
+        ${result.hasMore && html`<button type="button" class="chat-load-more" disabled=${loading} onClick=${() => setBefore(result.before)}>查看更早消息</button>`}
+        ${!result.messages.length && html`<p class="chat-history-notice">这段对话暂时没有可显示的消息。</p>`}
+        ${result.messages.map(message => html`<${Message} key=${message.id} message=${message} sessionId=${sessionId} tool="claude" reveal=${reveal} projectPath=${projectPath} />`)}
+        ${result.notice && html`<p class="chat-history-notice">${result.notice}</p>`}
+      `}
+    </div></div>
+  </section>`
+}
+
 function SessionChat({ sessionId }) {
   const store = getSession(sessionId)
   const [, setVersion] = useState(0)
@@ -287,6 +376,7 @@ function SessionChat({ sessionId }) {
   const [locationOpen, setLocationOpen] = useState(false)
   const [locationPath, setLocationPath] = useState('')
   const [locationChoices, setLocationChoices] = useState([])
+  const [browseClaude, setBrowseClaude] = useState(false)
   const [advancedPanel, setAdvancedPanel] = useState(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [advancedLoading, setAdvancedLoading] = useState(false)
@@ -308,6 +398,7 @@ function SessionChat({ sessionId }) {
   const fileRef = useRef(null)
   const alive = useRef(true)
   const refreshRef = useRef(null)
+  const resumeAttempted = useRef(false)
   const receiptRefreshRef = useRef(null)
   const lastSessionActivity = useRef(null)
   const uploads = useRef(new Map())
@@ -423,6 +514,7 @@ function SessionChat({ sessionId }) {
   })
 
   useLayoutEffect(() => {
+    if (!threadRef.current || !scrollRef.current) return
     let frame
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame)
@@ -433,7 +525,7 @@ function SessionChat({ sessionId }) {
     observer.observe(threadRef.current)
     observer.observe(scrollRef.current)
     return () => { observer.disconnect(); cancelAnimationFrame(frame) }
-  }, [])
+  }, [browseClaude])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -461,7 +553,9 @@ function SessionChat({ sessionId }) {
         const promptRevision = store.promptRevision
         const history = await request('/desktop/chat/history?' + new URLSearchParams({ sessionId }), undefined, controller.signal)
         if (!alive.current) return
+        updateSessionActivity(sessionId, history)
         const conversationChanged = store.history.conversationId && history.conversationId && store.history.conversationId !== history.conversationId
+        if (conversationChanged && session?.tool === 'claude') setNotice('终端已切换对话。之前的记录可在「终端对话」中查看。')
         // A poll started before a response must not restore the previous prompt.
         if (!conversationChanged && promptRevision !== store.promptRevision) history.prompt = store.history.prompt
         const fresh = history.messages || []
@@ -509,6 +603,7 @@ function SessionChat({ sessionId }) {
     refresh()
     return () => {
       alive.current = false
+      clearSessionActivity(sessionId)
       controller?.abort(); clearTimeout(timer)
       document.removeEventListener('visibilitychange', visibility)
       window.removeEventListener('focus', visibility)
@@ -540,7 +635,7 @@ function SessionChat({ sessionId }) {
         if (receipt.observedInHistory === true && receipt.status !== 'landed' && alive.current) setNotice('已在会话记录中看到此消息；投递回执未完整确认。')
         refreshRef.current?.()
       } else if (receipt.settled === true && receipt.requestActive === false &&
-                 ['typed','submitted'].includes(receipt.status) && receipt.sendId &&
+                 ['typed','submitted','unknown'].includes(receipt.status) && receipt.sendId &&
                  receipt.clientId === pending.clientId && (!pending.sendId || receipt.sendId === pending.sendId)) {
         update({ pending: null, recoveryRecords: [...store.recoveryRecords,
           { ...store.pending, ...receipt, kind: 'send', trackingStopped: true }] })
@@ -673,8 +768,8 @@ function SessionChat({ sessionId }) {
   }
 
   async function queryRecovery(record) {
-    const id = record.kind === 'send' ? record.clientId : record.requestId
-    const same = item => item.kind === record.kind && (item.kind === 'send' ? item.clientId : item.requestId) === id
+    const key = recoveryKey(record)
+    const same = item => recoveryKey(item) === key
     try {
       const params = record.kind === 'send' ? record.sendId ? { sendId: record.sendId } : { sessionId, clientId: record.clientId }
         : { sessionId, requestId: record.requestId }
@@ -684,6 +779,11 @@ function SessionChat({ sessionId }) {
     } catch (err) {
       update({ recoveryRecords: store.recoveryRecords.map(item => same(item) ? { ...item, receiptError: err.message } : item) })
     }
+  }
+
+  function dismissRecovery(record) {
+    const key = recoveryKey(record)
+    update({ recoveryRecords: store.recoveryRecords.filter(item => recoveryKey(item) !== key) })
   }
 
   async function send() {
@@ -948,6 +1048,13 @@ function SessionChat({ sessionId }) {
   const statusText = starting ? '正在启动' : startFailed ? '会话启动失败' : stopped ? '未运行' : modelBusy ? '正在切换模型' :
     verifiedPrompt ? '等待你的确认' : commandPending ? store.pendingCommand.prompt ? '等待命令选择' : store.pendingCommand.state === 'unknown' ? '命令结果待确认' : '命令处理中' :
     requiresAction ? '等待你的确认' : requestIssue ? issueStatusText : running ? '正在处理' : store.history.backgroundWork ? '后台任务运行中' : store.loaded ? '可以发送消息' : '正在连接'
+  useEffect(() => {
+    if (resumeAttempted.current || !store.loaded || !store.history.resumeOnOpen || readOnly) return
+    resumeAttempted.current = true
+    if (stopped && !startupError) void startSession()
+  }, [store.loaded, store.history.resumeOnOpen, readOnly, stopped, startupError])
+  if (browseClaude && session?.tool === 'claude') return html`<${ClaudeConversations} sessionId=${sessionId}
+    liveIdentity=${store.history.conversationId} projectPath=${session.path} reveal=${reveal} onClose=${() => setBrowseClaude(false)} />`
   const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files')
   return html`<section class="chat-panel" data-desktop-session-id=${sessionId} aria-label="会话聊天"
     onDragEnter=${event => { if (hasFiles(event)) { event.preventDefault(); dragDepth.current++; setDragging(true) } }}
@@ -976,6 +1083,7 @@ function SessionChat({ sessionId }) {
         <${SessionModelControls} key=${sessionId + ':' + session?.tool} sessionId=${sessionId} tool=${session?.tool}
         disabled=${readOnly || stopped || running || starting || requiresAction || accountBusy || Boolean(store.pending) || Boolean(commandPending)}
         openRequest=${modelOpenRequest} onBusyChange=${value => { modelBusyRef.current = value; setModelBusy(value) }} onApplied=${() => refreshRef.current?.()} />
+        ${session?.tool === 'claude' && html`<button type="button" class="chat-terminal-button" onClick=${() => setBrowseClaude(true)}>终端对话</button>`}
         <button type="button" class="chat-terminal-button" title="在独立终端打开" aria-label="在独立终端打开" disabled=${openingTerminal} onClick=${openTerminal}>
           <span aria-hidden="true">›_</span><span class="chat-terminal-label">${openingTerminal ? '正在打开…' : '独立终端'}</span></button>
         <button type="button" class="chat-icon-button" title="打开项目文件夹" aria-label="打开项目文件夹" onClick=${() => reveal()}>▱</button>
@@ -996,11 +1104,14 @@ function SessionChat({ sessionId }) {
       ${store.loaded && store.messages.length === 0 && html`<div class="chat-empty"><span class="chat-empty-mark">✳</span><h2>${startFailed ? '会话启动失败' : stopped ? '继续你的工作' : '从这里开始'}</h2><p>${startFailed ? '进程启动后提前退出，请重试或打开高级控制检查。' : stopped ? '启动会话后，输入需求或添加文件。' : '描述要完成的事，也可以拖入图片和文件。'}</p></div>`}
       ${store.messages.filter(message => ['user', 'assistant', 'tool'].includes(message.role)).map(message => html`<${Message} key=${message.id} message=${message} sessionId=${sessionId} tool=${session?.tool} reveal=${reveal} projectPath=${session?.path} />`)}
       ${store.recoveryRecords.map(record => html`<section class="chat-pending chat-recovery" key=${record.clientId || record.requestId}>
-        <strong>${record.settled && ['typed','submitted'].includes(record.status) && !record.observedInHistory
+        <strong>${record.kind === 'send' && record.settled && ['typed','submitted','unknown'].includes(record.status) && !record.observedInHistory
           ? '投递跟踪已结束，送达未确认' : '已停止本地跟踪，原请求保留'}</strong><p translate="no">${record.text || record.command || record.attachments?.map(file => file.name).join('、')}</p>
         <small>${record.receiptError || record.reason || record.message || ''}</small>
         ${['landed', 'done'].includes(record.status || record.state) && html`<p>原请求已完成</p>`}
-        <button type="button" onClick=${() => queryRecovery(record)}>查询原请求</button>
+        <div class="chat-request-issue-actions">
+          <button type="button" onClick=${() => queryRecovery(record)}>查询原请求</button>
+          <button type="button" onClick=${() => dismissRecovery(record)}>我知道了</button>
+        </div>
         ${(record.prompt || record.needsInput) && html`<button type="button" disabled=${openingTerminal} onClick=${openTerminal}>在独立终端继续</button>`}
       </section>`)}
       ${store.pending && html`<div class="chat-pending" role="status"><strong>${store.pending.retrySafe ? '消息未送达' : store.pending.status === 'submitting' ? '正在提交消息…' : store.pending.deliverNowState === 'pending' ? '正在立即投递…' : store.pending.status === 'unknown' ? '发送结果待确认' : '等待原会话确认消息'}</strong>

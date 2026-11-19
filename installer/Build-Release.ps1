@@ -1,5 +1,5 @@
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.2',
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.3',
     [string]$InnoCompiler = '',
     [switch]$SkipClientBuild
 )
@@ -57,7 +57,7 @@ $files = @(
 $files += $clientNames | ForEach-Object { 'desktop-client/dist/' + $_ }
 $files += @(
     'account-login.py', 'account-sessions.mjs', 'account-batches.mjs', 'codex-local.mjs', 'manual-login.mjs', 'account-terminal.ps1', 'agent-deck-files.py', 'chat-backend.mjs', 'chat-history.py', 'chat-quota.mjs',
-    'claude-slash-commands.json', 'claude-statusline.py', 'codex-slash-commands.json',
+    'claude-slash-commands.json', 'claude-statusline.py', 'claude-conversation-sync.py', 'claude-conversations.mjs', 'codex-slash-commands.json',
     'codex-suggestions.mjs', 'command-backend.mjs', 'completion-status.mjs',
     'deliver-now-control.mjs', 'deliver-now.mjs', 'desktop-diagnostics.mjs',
     'install-claude-statusline.py', 'install-provider-trust.py', 'provider-launch.py', 'install-web.py', 'install.py', 'message-paths.mjs',
@@ -77,7 +77,7 @@ $files += @(
     'AccountSettings.js', 'ManualLogin.js', 'SessionAccount.js', 'DesktopSettings.js', 'DiagnosticsSettings.js', 'icon.css', 'InlinePrompt.js',
     'main.js', 'NativeTerminalPanel.js', 'outputFileReferences.js', 'outputFiles.css',
     'OutputFiles.js', 'paneRegistry.js', 'project.css', 'ProjectActions.js',
-    'ProjectDialog.js', 'SessionModelControls.js', 'Sidebar.js', 'SlashCommandMenu.js', 'slashCommandPolicy.js',
+    'ProjectDialog.js', 'sessionActivity.js', 'SessionModelControls.js', 'Sidebar.js', 'SlashCommandMenu.js', 'slashCommandPolicy.js',
     'slashCommands.css', 'terminalLinks.js', 'TerminalPanel.js', 'Topbar.js',
     'uiOperations.js', 'uiState.js'
 ) | ForEach-Object { 'desktop-files/web-ui/overrides/static/app/' + $_ }

@@ -116,6 +116,28 @@ function nativeState(rows, extra = {}) {
   return { cursor: rows.findIndex(item => item.focused), rows, ...extra };
 }
 
+export function claudeSurveyPrompt(content) {
+  const lines = clean(content).split('\n').map(line => line.trim()).filter(Boolean);
+  const index = lines.findLastIndex(line => /^(?:❯\s*)?(?:●\s*)?How is Claude doing this session\? \(optional\)$/.test(line));
+  if (index < 0 || lines.length - index > 10) return null;
+  const footer = /^(?:─{5,}|❯|[⏵»]+ .+|\? for shortcuts|.+ · \? for shortcuts|.+\| Context \d.*)$/;
+  const trailing = lines.slice(index + 1);
+  const footerIndex = trailing.findIndex(line => footer.test(line));
+  const choices = (footerIndex < 0 ? trailing : trailing.slice(0, footerIndex)).join(' ');
+  if (!/^1:\s*Bad\s+2:\s*Fine\s+3:\s*Good\s+0:\s*Dismiss$/.test(choices) ||
+      footerIndex >= 0 && trailing.slice(footerIndex).some(line => !footer.test(line))) return null;
+  const title = lines[index];
+  const before = lines[index - 1] || '';
+  if (!/^[❯●]/.test(title) && !/^─{5,}$/.test(before) && before !== '❯') return null;
+  // A question quoted in the transcript above the ordinary composer is not active.
+  if (trailing.includes('❯') && !title.startsWith('❯') && !/^─{5,}$/.test(before)) return null;
+  return { type: 'survey', kind: 'survey', supported: true, state: 'ready',
+    id: digest(['claude-session-quality', choices.replace(/\s+/g, '')]),
+    text: '这次 Claude 的使用体验如何？（可选）',
+    options: [{ value: '1', label: '不满意' }, { value: '2', label: '一般' }, { value: '3', label: '满意' }],
+    actions: [{ value: 'cancel', label: '跳过' }], _native: nativeState([]) };
+}
+
 export function claudePrompt(content, request) {
   const lines = clean(content).split('\n');
   let tabs = lines.findLastIndex(line => /^\s*←.*[☐☒].*✔\s*Submit.*→\s*$/.test(line));
@@ -211,6 +233,14 @@ export function claudePrompt(content, request) {
 }
 
 export function validateClaudeAnswer(prompt, body) {
+  if (prompt.type === 'survey') {
+    if (body.text !== undefined || body.choices !== undefined) throw new Error('请选择问卷中的评分或跳过。');
+    if (body.action === 'cancel' && body.choice === undefined) return { key: '0' };
+    if ((!body.action || body.action === 'submit') && prompt.options.some(option => option.value === body.choice)) {
+      return { key: body.choice };
+    }
+    throw new Error('请选择问卷中的评分或跳过。');
+  }
   if (body.action === 'cancel' && prompt.actions.some(action => action.value === 'cancel')) return { cancel: true };
   if (prompt.type === 'review') {
     if (body.action !== 'submit') throw new Error('请选择提交或取消。');
@@ -281,6 +311,7 @@ export async function answerClaudePrompt(original, answer, io) {
     if (current._native.rows[target].checked !== selected) throw new Error('未能确认原生多选状态，操作已停止。');
   }
   try {
+    if (original.type === 'survey') return result(await press(['--named-key', answer.key], true));
     if (answer.cancel) {
       if (original.type === 'review') { await move(1); return result(await press(['--named-key', 'Enter'], true)); }
       return result(await press(['--named-key', 'Escape'], true));

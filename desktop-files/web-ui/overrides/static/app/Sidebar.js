@@ -17,15 +17,18 @@ import {
 } from './state.js'
 import {
   statusFiltersSignal, showColsSignal, activeTabSignal,
-  sidebarFilterSignal, groupExpandedSignal,
+  sidebarFilterSignal, groupExpandedSignal, profileSignal,
 } from './uiState.js'
-import { apiFetch } from './api.js'
+import { apiFetch, authHeaders } from './api.js'
 import { addToast } from './Toast.js'
 import { formatRelativeTime } from './timeFmt.js'
 import { AnnotationLine } from './annotations.js'
 import { noteSessionStarted } from './terminalReconnect.js'
 import { ProjectActions } from './ProjectActions.js'
 import { openProjectDialog } from './ProjectDialog.js'
+import { unreadCompletionSessionsSignal, visibleCompletionSessionSignal } from './CompletionNotifications.js'
+import { languageSignal } from './desktopPreferences.js'
+import { sessionIndicatorStatus } from './sessionActivity.js'
 
 // Older cached document shells may lack this link while loading the new tree.
 // Keep its grid placement styles with the component so guides/toggles cannot
@@ -227,7 +230,7 @@ function ProjectMenu({ group }) {
   </div>`
 }
 
-function SessionItem({ s, sel, rowKey, onSelect, showCols, depth, groupDepth, childCount, childrenExpanded, row }) {
+function SessionItem({ s, sel, rowKey, onSelect, showCols, depth, groupDepth, childCount, childrenExpanded, row, model }) {
   const [exp, setExp] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const actionsRef = useRef(null)
@@ -256,9 +259,17 @@ function SessionItem({ s, sel, rowKey, onSelect, showCols, depth, groupDepth, ch
     doAction(verb, s)
   }
   const indented = depth > groupDepth + 1
+  const completed = unreadCompletionSessionsSignal.value.has(s.id) || visibleCompletionSessionSignal.value === s.id
   const parent = s.parent && menuModelSignal.value.sessions.find(session => session.id === s.parent)
   const mcpCount = (s.mcps || []).length
   const skillCount = (s.skills || []).length
+  const english = languageSignal.value === 'en'
+  const configured = s.modelId || [s.model, s.modelVersion].filter(Boolean).join(' ')
+  const modelId = model?.source === 'current' ? model.modelId : configured || model?.modelId
+  const modelText = modelId ? sidebarModelLabel(modelId) : english ? 'Unknown model' : '模型未确认'
+  let modelTitle = modelId || modelText
+  if (!configured && model?.source === 'history') modelTitle = (english ? 'Last recorded model · ' : '最近一次记录 · ') + modelId
+  if (!configured && model?.source === 'early-history') modelTitle = (english ? 'Earlier recorded model · ' : '早期记录 · ') + modelId
   // Persisted showCols from before this option existed lack the key; on by default.
   const showAnnotation = showCols.annotations !== false
   const hasSubline =
@@ -285,7 +296,8 @@ function SessionItem({ s, sel, rowKey, onSelect, showCols, depth, groupDepth, ch
       <span class="sig desktop-session-icon" aria-label="会话"><${Icon} d=${CHAT_ICON} size=${15}/></span>
       <div class="titleline">
         <span class="tt" title=${s.title} translate="no">${s.title}</span>
-        <${Dot} status=${s.status}/>
+        ${completed && html`<span class="session-completion-bubble" role="status">${languageSignal.value === 'en' ? 'Done' : '已完成'}</span>`}
+        <${Dot} status=${sessionIndicatorStatus(s)}/>
       </div>
       ${(childCount > 0 || (s.parent && !indented)) && html`<div class="desktop-session-relation">
         ${childCount > 0 && html`<span>${childCount} 个子会话</span>`}
@@ -293,6 +305,7 @@ function SessionItem({ s, sel, rowKey, onSelect, showCols, depth, groupDepth, ch
       </div>`}
       <div class="meta">
         ${showCols.tool && s.tool && html`<span class="tag">${s.tool}</span>`}
+        <span class="desktop-session-model" title=${modelTitle} translate="no">${modelText}</span>
         ${showCols.cost && s.cost > 0 && html`<span class="cost">$${s.cost.toFixed(2)}</span>`}
         <button class="row-chev" title="Details" onClick=${e => { e.stopPropagation(); setExp(v => !v) }}>
           ${exp ? '▾' : '▸'}
@@ -340,6 +353,12 @@ function SessionItem({ s, sel, rowKey, onSelect, showCols, depth, groupDepth, ch
   `
 }
 
+function sidebarModelLabel(id) {
+  const claude = /^claude-(opus|sonnet|fable|haiku)-(\d+)(?:-(\d+))?(?:-\d{8})?$/i.exec(id)
+  if (claude) return claude[1][0].toUpperCase() + claude[1].slice(1) + ' ' + claude[2] + (claude[3] ? '.' + claude[3] : '')
+  return id.replace(/^gpt-/i, 'GPT-').replace(/-(sol|terra|astra|luna)$/i, (_, name) => '-' + name[0].toUpperCase() + name.slice(1))
+}
+
 export function Sidebar() {
   const { sessions, groups } = menuModelSignal.value
   const rows = projectSidebarRowsSignal.value
@@ -350,6 +369,46 @@ export function Sidebar() {
   const filter = sidebarFilterSignal.value
   const expandedMap = groupExpandedSignal.value
   const [showMenu, setShowMenu] = useState(false)
+  const profile = profileSignal.value
+  const [sessionModels, setSessionModels] = useState({})
+  useEffect(() => {
+    const controller = new AbortController()
+    let loading = false
+    async function refreshModels() {
+      if (loading || document.hidden) return
+      loading = true
+      const requested = Date.now()
+      try {
+        const response = await fetch('/desktop/sidebar-models?' + new URLSearchParams({ profile }), {
+          headers: authHeaders({ 'X-AgentDeck-Desktop': '1' }), signal: controller.signal, cache: 'no-store',
+        })
+        if (!response.ok) return
+        const { models } = await response.json()
+        if (!models || controller.signal.aborted) return
+        setSessionModels(previous => ({
+          ...models,
+          ...Object.fromEntries(Object.entries(previous).filter(([, item]) => requested - item.observedAt < 30000)),
+        }))
+      } catch (_) {
+        // Keep the last labels while the local bridge reconnects.
+      } finally { loading = false }
+    }
+    function observed(event) {
+      const { sessionId, modelId } = event.detail || {}
+      if (!sessionId || !modelId) return
+      setSessionModels(previous => ({ ...previous, [sessionId]: { modelId, source: 'current', observedAt: Date.now() } }))
+    }
+    refreshModels()
+    const timer = setInterval(refreshModels, 30000)
+    document.addEventListener('visibilitychange', refreshModels)
+    window.addEventListener('agentdeck:session-model', observed)
+    return () => {
+      controller.abort()
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', refreshModels)
+      window.removeEventListener('agentdeck:session-model', observed)
+    }
+  }, [profile])
   const projectPaths = useMemo(() => new Map(groups.map(group => {
     const members = sessions.filter(session => session.group === group.path || session.group.startsWith(group.path + '/'))
     const paths = [...new Set(members.map(session => session.path).filter(Boolean))]
@@ -458,7 +517,7 @@ export function Sidebar() {
             </div>
           `
           : html`
-            <${SessionItem} key=${r.key} s=${r.session} sel=${selected === r.id}
+            <${SessionItem} key=${r.key} s=${r.session} sel=${selected === r.id} model=${sessionModels[r.id]}
                             rowKey=${r.key} depth=${r.depth} groupDepth=${r.groupDepth}
                             row=${r}
                             childCount=${r.childCount} childrenExpanded=${r.childrenExpanded}

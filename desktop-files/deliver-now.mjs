@@ -41,7 +41,7 @@ async function snapshot(data, meta, api) {
   const defaultKeys = await claudeDefaultKeys(row);
   const pane = output.content || '';
   const queueProof = row.tool === 'claude' && defaultKeys && ['typed', 'submitted'].includes(data.state) &&
-    claudeQueuedInput(pane, data.message) && await claudeQueueProof(row, data.message, data.created_at);
+    claudeQueuedInput(pane, data.message) && await claudeQueueProof(row, data);
   const gate = deliveryCapability(data, row, pane, { sendId: meta.sendId,
     identity: meta.conversationIdentity, defaultKeys, queueProof });
   if (gate.canDeliverNow && !await supportedVersion(api)) return { row, data, gate: { canDeliverNow: false,

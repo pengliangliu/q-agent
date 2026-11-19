@@ -48,8 +48,10 @@ try {
         }
         if (-not $terminal) { throw $failureMessage }
         $failureMessage = '无法打开当前会话的独立终端。'
+        $wsl = Join-Path $env:ProgramFiles 'WSL\wsl.exe'
+        if (-not (Test-Path -LiteralPath $wsl -PathType Leaf)) { $wsl = Join-Path $env:WINDIR 'System32\wsl.exe' }
         $arguments = @('-w', 'new', 'new-tab', '--title', "Q-agent - $SessionId",
-            (Join-Path $env:WINDIR 'System32\wsl.exe'), '-d', [string]$configuration.distro, '-u', [string]$configuration.user, '--exec',
+            $wsl, '-d', [string]$configuration.distro, '-u', [string]$configuration.user, '--exec',
             [string]$configuration.deck, '-p', $TerminalProfile, 'session', 'attach', $SessionId)
         $start = New-Object System.Diagnostics.ProcessStartInfo
         $start.FileName = $terminal

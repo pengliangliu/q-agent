@@ -28,7 +28,7 @@
 
 ## 下载安装包
 
-从 [GitHub Releases](https://github.com/pengliangliu/q-agent/releases/latest) 下载 **Q-agent-Setup-0.1.2-windows-x64.exe**。安装包使用企鹅图标，按当前 Windows 用户安装，附带编译好的客户端，无需安装开发工具。首次运行会打开中文环境配置向导：
+从 [GitHub Releases](https://github.com/pengliangliu/q-agent/releases/latest) 下载 **Q-agent-Setup-0.1.3-windows-x64.exe**。安装包使用企鹅图标，按当前 Windows 用户安装，附带编译好的客户端，无需安装开发工具。首次运行会打开中文环境配置向导：
 
 1. **检测已有环境**：选择 WSL2 发行版和普通 Linux 用户。环境就绪时，可直接连接客户端。
 2. **没有 WSL**：点击“启用 / 安装 WSL”，按 Windows 提示授权；如需重启，保存工作并自行重启，再从开始菜单打开“Q-agent 环境设置”。点击“安装 Ubuntu 24.04”添加官方发行版。
@@ -49,11 +49,11 @@ Get-FileHash .\Q-agent-Setup-0.1.0-windows-x64.exe -Algorithm SHA256
 
 ## 运行要求
 
-本扩展针对 **Agent Deck v1.16.35**。本次适配过 Claude Code **2.1.316** 和 Codex CLI **0.163.0**；原生菜单或协议升级后可能需要重新适配。
+安装向导支持 **Agent Deck v1.16.35 和 v1.16.38**，缺少 Agent Deck 时安装 v1.16.38。本次适配过 Claude Code **2.1.316** 和 Codex CLI **0.163.0**；原生菜单或协议升级后可能需要重新适配。
 
 - Windows 10/11 x64，.NET Framework 4.8，以及 [WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)。
 - WSL2 Linux，启用 systemd 的用户服务和 Windows 互操作；使用普通 Linux 用户安装。
-- WSL 中运行 Agent Deck v1.16.35、Node.js 22+、Python 3 和 tmux，安装向导可补齐。
+- WSL 中运行受支持的 Agent Deck、Node.js 22+、Python 3 和 tmux，安装向导可补齐。
 - Claude Code / Codex CLI 使用者自行登录，并能在 Agent Deck 中使用。
 - Windows Terminal 用于“独立终端”。源码构建使用 Windows 的 .NET Framework 编译器；安装包无需编译。
 
@@ -61,7 +61,7 @@ Get-FileHash .\Q-agent-Setup-0.1.0-windows-x64.exe -Algorithm SHA256
 
 ## 从源码安装
 
-手动准备上述 WSL 依赖（[Agent Deck 官方说明](https://github.com/asheshgoplani/agent-deck/tree/v1.16.35)），克隆或下载本仓库，在 Windows PowerShell 中进入仓库目录后执行：
+手动准备上述 WSL 依赖（[Agent Deck 官方说明](https://github.com/asheshgoplani/agent-deck/tree/v1.16.38)），克隆或下载本仓库，在 Windows PowerShell 中进入仓库目录后执行：
 
 ```powershell
 # 使用默认 WSL 发行版和默认 Linux 用户

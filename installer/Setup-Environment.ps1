@@ -57,6 +57,14 @@ function Invoke-QAgentNative([string]$File, [string[]]$Arguments, [int]$TimeoutS
         return $result
     } finally { $process.Dispose() }
 }
+function Get-QAgentWslExecutable {
+    $installed = Join-Path $env:ProgramFiles 'WSL\wsl.exe'
+    if (Test-Path -LiteralPath $installed -PathType Leaf) { return $installed }
+    $system = Join-Path $env:WINDIR 'System32\wsl.exe'
+    if (Test-Path -LiteralPath $system -PathType Leaf) { return $system }
+    $command = Get-Command wsl.exe -CommandType Application -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+}
 function Get-QAgentWindowsStatus {
     $distros = @()
     $lxss = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
@@ -78,7 +86,7 @@ function Get-QAgentWindowsStatus {
     return [pscustomobject]@{
         distros = $distros; webview = $webview
         framework = [bool]($framework -and $framework.PSObject.Properties['Release'] -and $framework.Release -ge 528040)
-        wslCommand = [bool](Get-Command wsl.exe -ErrorAction SilentlyContinue)
+        wslCommand = [bool](Get-QAgentWslExecutable)
     }
 }
 if ($FunctionsOnly) { return }
@@ -107,7 +115,7 @@ try {
         if (-not $RootUser) {
             $Command = @('bash','-c','export PATH="$HOME/.local/bin:$PATH"; exec "$@"','q-agent') + $Command
         }
-        Invoke-QAgentNative 'wsl.exe' ($selection + @('--exec') + $Command) -TimeoutSeconds $Timeout -AllowFailure:$AllowFailure
+        Invoke-QAgentNative (Get-QAgentWslExecutable) ($selection + @('--exec') + $Command) -TimeoutSeconds $Timeout -AllowFailure:$AllowFailure
     }
     function Get-BootstrapPath {
         (Invoke-Selected @('wslpath','-u',(Join-Path $PSScriptRoot 'bootstrap-wsl.sh'))).stdout
@@ -127,7 +135,7 @@ try {
         }
         'wsl' {
             Write-Output 'Installing Windows WSL components. A Windows restart may be required.'
-            $command = Invoke-QAgentNative 'wsl.exe' @('--install','--no-distribution','--no-launch') -TimeoutSeconds 3600 -AllowFailure
+            $command = Invoke-QAgentNative (Get-QAgentWslExecutable) @('--install','--no-distribution','--no-launch') -TimeoutSeconds 3600 -AllowFailure
             if ($command.code -notin @(0,3010)) { throw ('WSL installation failed. ' + $command.stdout + ' ' + $command.stderr) }
             $result.message = 'WSL components installed. If Windows requests a restart, save your work, restart, then reopen Q-agent setup.'
         }
@@ -136,7 +144,7 @@ try {
                 throw 'Ubuntu-24.04 already exists. Select it and initialize its normal user instead of reinstalling.'
             }
             Write-Output 'Installing the official Ubuntu-24.04 distribution. Internet access is required.'
-            Invoke-QAgentNative 'wsl.exe' @('--install','--distribution','Ubuntu-24.04','--no-launch') -TimeoutSeconds 3600 | Out-Null
+            Invoke-QAgentNative (Get-QAgentWslExecutable) @('--install','--distribution','Ubuntu-24.04','--no-launch') -TimeoutSeconds 3600 | Out-Null
             $result.message = 'Ubuntu installed. Select Ubuntu-24.04, then open step 2 to create its Linux user and password.'
         }
         'dependencies' {
@@ -156,7 +164,7 @@ try {
             $result.message = 'systemd configured with a backup of the existing settings. Save all work in this distribution before selecting Restart selected WSL.'
         }
         'restart' {
-            Invoke-QAgentNative 'wsl.exe' @('--terminate',$Distro) | Out-Null
+            Invoke-QAgentNative (Get-QAgentWslExecutable) @('--terminate',$Distro) | Out-Null
             $result.message = 'The selected distribution has stopped. Detect again to start it and verify systemd.'
         }
         'bridge' {

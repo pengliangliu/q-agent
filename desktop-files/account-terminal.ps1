@@ -11,4 +11,6 @@ $arguments = @('-d',$data.distro,'-u',$data.user,'--cd','~','--exec','/usr/bin/p
 $line = ($arguments | ForEach-Object {
     if ($_ -match '\s') { '"' + ($_ -replace '(\\+)$','$1$1') + '"' } else { $_ }
 }) -join ' '
-Start-Process -FilePath (Join-Path $env:WINDIR 'System32\wsl.exe') -ArgumentList $line -WindowStyle Normal
+$wsl = Join-Path $env:ProgramFiles 'WSL\wsl.exe'
+if (-not (Test-Path -LiteralPath $wsl -PathType Leaf)) { $wsl = Join-Path $env:WINDIR 'System32\wsl.exe' }
+Start-Process -FilePath $wsl -ArgumentList $line -WindowStyle Normal

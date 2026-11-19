@@ -28,8 +28,14 @@ namespace QAgent
 
         internal BackendStartup()
             : this(Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "wsl.json")),
-                   Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "wsl.exe"), null)
+                   ResolveWslExecutable(), null)
         {
+        }
+
+        private static string ResolveWslExecutable()
+        {
+            string installedWsl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WSL", "wsl.exe");
+            return File.Exists(installedWsl) ? installedWsl : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "wsl.exe");
         }
 
         // The private fixture supplies a harmless executable and health probe.

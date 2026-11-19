@@ -25,7 +25,8 @@ if ($UseBundledClient) {
     Test-QAgentBundle -Root $PSScriptRoot
 }
 . (Join-Path $PSScriptRoot 'installer\Setup-Environment.ps1') -FunctionsOnly -Distro $Distro -LinuxUser $LinuxUser
-$wsl = (Get-Command wsl.exe -ErrorAction Stop).Source
+$wsl = Get-QAgentWslExecutable
+if (-not $wsl) { throw 'WSL is unavailable. Install WSL in Q-agent setup first.' }
 $selection = @()
 if ($Distro) { $selection += @('-d', $Distro) }
 if ($LinuxUser) { $selection += @('-u', $LinuxUser) }

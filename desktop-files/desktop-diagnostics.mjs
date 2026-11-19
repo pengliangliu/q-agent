@@ -10,7 +10,7 @@ const versionFiles = ['web-server.mjs', 'desktop-diagnostics.mjs', 'chat-backend
   'model-controls.mjs', 'account-batches.mjs', 'codex-local.mjs', 'chat-history.py', 'message-paths.mjs', 'output-files.mjs', 'web-ui/overrides/desktop-ui.js', 'web-ui/overrides/sw.js',
   ...['main.js', 'AppShell.js', 'Topbar.js', 'Sidebar.js', 'ChatPanel.js', 'SessionModelControls.js', 'CommandResult.js',
     'InlinePrompt.js', 'CompletionNotifications.js', 'DesktopSettings.js', 'AccountSettings.js', 'AccountBatch.js', 'SessionAccount.js', 'DiagnosticsSettings.js', 'desktopPreferences.js',
-    'uiOperations.js', 'OutputFiles.js', 'outputFileReferences.js', 'outputFiles.css', 'chat.css', 'project.css', 'codex-theme.css', 'desktopSettings.css']
+    'uiOperations.js', 'sessionActivity.js', 'OutputFiles.js', 'outputFileReferences.js', 'outputFiles.css', 'chat.css', 'project.css', 'codex-theme.css', 'desktopSettings.css']
     .map(name => 'web-ui/overrides/static/app/' + name)];
 const versionCache = new Map();
 let applicationCache;

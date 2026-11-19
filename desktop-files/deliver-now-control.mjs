@@ -70,7 +70,11 @@ export function claudeQueuedInput(content, message) {
   if (lines[queued] !== `❯ ${message}`) return false;
   let previous = queued - 1;
   while (previous >= 0 && !lines[previous]) previous--;
-  if (previous < 0 || /^❯(?:\s|$)/.test(lines[previous])) return false;
+  if (previous < 0) return false;
+  // A preceding queued entry can span several terminal rows.
+  for (; previous >= 0 && lines[previous]; previous--) {
+    if (/^❯(?:\s|$)/.test(lines[previous])) return false;
+  }
   const value = lines[composer].replace(/^❯\s*/, '');
   if (!value) return true;
   if (value !== 'Press up to edit queued messages') return false;
@@ -81,17 +85,28 @@ export function claudeQueuedInput(content, message) {
   return nativeComposer('claude', composerOnly);
 }
 
-export async function claudeQueueProof(row, message, createdAt) {
-  if (!row.claude_session_id || !row.transcript_path?.endsWith('.jsonl')) return false;
+export async function claudeQueueProof(row, data) {
+  if (!row.claude_session_id || !row.transcript_path?.endsWith('.jsonl') ||
+      data.transcript_path && data.transcript_path !== row.transcript_path) return false;
+  const since = Date.parse(data.created_at);
+  if (!Number.isFinite(since)) return false;
+  const start = Number.isSafeInteger(data.transcript_from) && data.transcript_from > 0 ? data.transcript_from : 0;
   const pending = [];
   try {
-    const input = createReadStream(row.transcript_path);
+    // The pane proves there is only one current queued input. The receipt's
+    // transcript position and creation time bind that input to this send.
+    const input = createReadStream(row.transcript_path, { start: Math.max(0, start - 1) });
     const reader = createInterface({ input, crlfDelay: Infinity });
+    let skipFirst = start > 0;
     try {
       for await (const line of reader) {
+        if (skipFirst) { skipFirst = false; continue; }
         if (!/"type"\s*:\s*"queue-operation"/.test(line)) continue;
         let event; try { event = JSON.parse(line); } catch { return false; }
         if (event.type !== 'queue-operation' || event.sessionId !== row.claude_session_id) continue;
+        const timestamp = Date.parse(event.timestamp);
+        if (!Number.isFinite(timestamp)) return false;
+        if (timestamp < since) continue;
         if (event.operation === 'enqueue') pending.push(event);
         else if (event.operation === 'dequeue') pending.shift();
         else if (event.operation === 'popAll') pending.length = 0;
@@ -101,8 +116,7 @@ export async function claudeQueueProof(row, message, createdAt) {
         } else return false;
       }
     } finally { reader.close(); input.destroy(); }
-    return pending.length === 1 && pending[0].content === message &&
-      (!createdAt || Date.parse(pending[0].timestamp) >= Date.parse(createdAt));
+    return pending.length === 1 && pending[0].content === data.message;
   } catch { return false; }
 }
 
@@ -207,7 +221,7 @@ export async function lockedDelivery(request, api) {
     const pane = output.content || '';
     return { row, data, pane, defaultKeys: await claudeDefaultKeys(row),
       queueProof: row.tool === 'claude' && ['typed', 'submitted'].includes(data.state) && claudeQueuedInput(pane, data.message) &&
-        await claudeQueueProof(row, data.message, data.created_at) };
+        await claudeQueueProof(row, data) };
   };
   const capability = item => deliveryCapability(item.data, item.row, item.pane,
     { sendId: request.sendId, identity: request.identity, defaultKeys: item.defaultKeys, queueProof: item.queueProof });

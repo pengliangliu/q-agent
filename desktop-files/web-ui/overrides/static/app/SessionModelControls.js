@@ -66,9 +66,16 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
     failedRequest.current = true; touched.current = true
   }
 
+  function reportModel(current) {
+    if (allowedModel(tool, current?.modelId)) {
+      window.dispatchEvent(new CustomEvent('agentdeck:session-model', { detail: { sessionId, modelId: current.modelId } }))
+    }
+  }
+
   function acceptState(data) {
     if (data.tool && data.tool !== tool) throw new Error('当前会话的助手类型已变化，请重新打开会话。')
     setState(data)
+    reportModel(data.current)
     if (!touched.current) {
       let nextModel = allowedModel(tool, data.current?.modelId) ? data.current.modelId : ''
       let nextEffort = data.current?.verified === true ? data.current.reasoningEffort || '' : ''
@@ -240,6 +247,7 @@ export function SessionModelControls({ sessionId, tool, disabled = false, openRe
       if (data.verified === true && data.current?.verified !== false && matches(data.current, operation)) {
         refreshRevision.current++
         setState(previous => ({ ...previous, ...data, current: { ...data.current, verified: true } }))
+        reportModel(data.current)
         savePending(null); touched.current = false; setNotice('已切换当前会话的模型与强度。'); onApplied?.()
       } else if (confirmedFailure(data)) {
         acceptState(data); finishFailure(operation, data)

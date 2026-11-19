@@ -15,8 +15,8 @@ for binary in (deck, node):
     if not Path(binary).is_file():
         raise SystemExit('Install Agent Deck and Node.js in this WSL user environment first.')
 version = subprocess.check_output([deck, 'version'], text=True).strip()
-if not re.fullmatch(r'Agent Deck v1\.16\.35(?: \(update available: v[^)]+\))?', version):
-    raise SystemExit('This release targets Agent Deck v1.16.35. Install that upstream version before continuing.')
+if not re.fullmatch(r'Agent Deck v1\.16\.(?:35|38)(?: \(update available: v[^)]+\))?', version):
+    raise SystemExit('Supported Agent Deck releases are v1.16.35 and v1.16.38.')
 if int(subprocess.check_output([node, '-p', 'process.versions.node.split(".")[0]'], text=True)) < 22:
     raise SystemExit('Node.js 22 or newer is required.')
 distro = os.environ.get('WSL_DISTRO_NAME', '')
@@ -38,6 +38,7 @@ if (root / 'web-ui/overrides').exists():
     shutil.copytree(root / 'web-ui/overrides', backup / 'overrides')
 shutil.copytree(source / 'web-ui/overrides', root / 'web-ui/overrides', dirs_exist_ok=True)
 subprocess.run(['/usr/bin/python3', str(root / 'install-provider-trust.py')], check=True)
+subprocess.run(['/usr/bin/python3', str(root / 'claude-conversation-sync.py'), 'install', str(home / '.claude')], check=True)
 
 def systemd_quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'

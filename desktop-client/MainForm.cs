@@ -36,6 +36,9 @@ namespace QAgent
         private bool closing;
         private bool documentReady;
         private bool listenerReady;
+        private bool taskbarReady;
+        private bool taskbarBadgeApplied;
+        private int unreadCompletedSessions;
         private CoreWebView2MemoryUsageTargetLevel? memoryTarget;
         private string pendingSession;
         private string runtimeVersion = "";
@@ -114,7 +117,7 @@ namespace QAgent
                 string notificationStatus = json.Serialize(Program.Notifications == null ? "Unavailable" : Program.Notifications.SettingName);
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(
                     "(()=>{if(location.origin==='http://127.0.0.1:8421'||location.origin==='http://localhost:8421')" +
-                    "{Object.defineProperty(window,'__agentDeckDesktop',{value:Object.freeze({host:'agentdeck-winforms',protocol:1,notifications:" + capability + ",notificationStatus:" + notificationStatus + "}),writable:false,configurable:false});}})();");
+                    "{Object.defineProperty(window,'__agentDeckDesktop',{value:Object.freeze({host:'agentdeck-winforms',protocol:1,notifications:" + capability + ",notificationStatus:" + notificationStatus + ",taskbarBadge:" + (main ? "true" : "false") + "}),writable:false,configurable:false});}})();");
                 if (closing) return;
                 ApplyMemoryTarget();
                 if (initialUri != null) core.Navigate(initialUri.AbsoluteUri);
@@ -250,6 +253,20 @@ namespace QAgent
                     PublishNotificationStatus();
                     return;
                 }
+                if (type == "agentdeck:completion-count")
+                {
+                    object value;
+                    if (main && message.TryGetValue("count", out value) && value is int)
+                    {
+                        int count = (int)value;
+                        if (count >= 0 && count <= 50 && count != unreadCompletedSessions)
+                        {
+                            unreadCompletedSessions = count;
+                            ApplyTaskbarBadge();
+                        }
+                    }
+                    return;
+                }
                 if (type != "agentdeck:notify") return;
                 string sessionId = ReadString(message, "sessionId"), notificationId = ReadString(message, "notificationId");
                 if (!Regex.IsMatch(sessionId, "^[A-Za-z0-9-]{8,100}$") || notificationId.Length < 1 || notificationId.Length > 256) return;
@@ -322,6 +339,28 @@ namespace QAgent
             ApplyMemoryTarget();
         }
         protected override void OnVisibleChanged(EventArgs args) { base.OnVisibleChanged(args); ApplyMemoryTarget(); }
+        protected override void WndProc(ref Message message)
+        {
+            base.WndProc(ref message);
+            if (main && message.Msg == TaskbarCompletionBadge.ButtonCreatedMessage)
+            {
+                taskbarReady = true;
+                ApplyTaskbarBadge();
+            }
+        }
+
+        private void ApplyTaskbarBadge()
+        {
+            if (!taskbarReady || closing || !IsHandleCreated) return;
+            try
+            {
+                TaskbarCompletionBadge.Apply(Handle, unreadCompletedSessions);
+                taskbarBadgeApplied = true;
+            }
+            catch (ExternalException) { taskbarBadgeApplied = false; }
+            if (documentReady) WriteState("ready", "");
+        }
+
         private void ApplyMemoryTarget()
         {
             if (web == null || web.CoreWebView2 == null || closing) return;
@@ -354,6 +393,7 @@ namespace QAgent
                     origin = "http://127.0.0.1:8421", memoryTarget = memoryTarget.HasValue ? memoryTarget.Value.ToString() : "Unknown", frontendReady = listenerReady,
                     notifications = Program.Notifications == null ? false : Program.Notifications.Available,
                     notificationSetting = Program.Notifications == null ? "Unavailable" : Program.Notifications.SettingName,
+                    unreadCompletedSessions = unreadCompletedSessions, taskbarBadgeApplied = taskbarBadgeApplied,
                     notificationsSubmitted = Program.Notifications == null ? 0 : Program.Notifications.SubmittedCount,
                     lastNotificationSession = Program.Notifications == null ? "" : Program.Notifications.LastSession,
                     lastNotificationClick = Program.Notifications == null ? "" : Program.Notifications.LastClick,

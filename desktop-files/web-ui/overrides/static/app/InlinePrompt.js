@@ -23,12 +23,13 @@ export function InlinePrompt({ prompt, response, disabled, onRespond, onRefresh,
     previousResponse.current = response
   }, [prompt?.id, response, autoSubmitSingle])
   const kind = prompt?.kind || prompt?.type
-  const singleQuestion = autoSubmitSingle && kind === 'question' && !prompt?.multiple
+  const survey = kind === 'survey'
+  const singleQuestion = survey || (autoSubmitSingle && kind === 'question' && !prompt?.multiple)
   const options = Array.isArray(prompt?.options) ? prompt.options : []
   const actions = Array.isArray(prompt?.actions) ? prompt.actions : []
   const textInput = prompt?.textInput
   const supported = prompt?.supported === true && prompt?.id &&
-    ['question', 'approval', 'review'].includes(kind) && (options.length || textInput || actions.length)
+    ['question', 'approval', 'review', 'survey'].includes(kind) && (options.length || textInput || actions.length)
   const locked = disabled || Boolean(response) || submitting
   const posting = response ? response.state === 'posting' : submitting
   const otherSelected = choices.includes('other')
@@ -64,15 +65,15 @@ export function InlinePrompt({ prompt, response, disabled, onRespond, onRefresh,
       ...(showText ? { text } : {}), action: 'submit' })
   }
 
-  return html`<section class="chat-inline-prompt" aria-label=${kind === 'approval' ? '权限确认' : '会话提问'}
+  return html`<section class="chat-inline-prompt" aria-label=${survey ? 'Claude 使用体验' : kind === 'approval' ? '权限确认' : '会话提问'}
     aria-busy=${posting} onKeyDown=${event => event.stopPropagation()}
     onKeyUp=${event => event.stopPropagation()} onKeyPress=${event => event.stopPropagation()}>
-    <header class="chat-prompt-header"><strong>${kind === 'approval' ? '需要你的确认' : kind === 'review' ? '核对并提交回答' : '需要你的回答'}</strong>
+    <header class="chat-prompt-header"><strong>${survey ? 'Claude 使用体验' : kind === 'approval' ? '需要你的确认' : kind === 'review' ? '核对并提交回答' : '需要你的回答'}</strong>
       ${prompt?.questionIndex && prompt?.questionCount && html`<span>第 ${prompt.questionIndex} / ${prompt.questionCount} 题</span>`}</header>
     ${prompt?.header && html`<h3 translate="no">${prompt.header}</h3>`}
     <pre class="chat-prompt-context" translate="no">${prompt?.text || '会话正在等待输入，当前提示尚未识别。'}</pre>
     ${supported ? html`<form onSubmit=${event => { event.preventDefault(); submit() }}>
-      ${options.length > 0 && html`<fieldset disabled=${locked} class="chat-prompt-options"><legend>${prompt.multiple ? '可选择多项，选好后提交' : singleQuestion ? '点击选项即提交；其他答案填写后提交' : '请选择一项，再提交'}</legend>
+      ${options.length > 0 && html`<fieldset disabled=${locked} class="chat-prompt-options"><legend>${survey ? '点击评分或跳过' : prompt.multiple ? '可选择多项，选好后提交' : singleQuestion ? '点击选项即提交；其他答案填写后提交' : '请选择一项，再提交'}</legend>
         ${options.map(option => html`<label class=${'chat-prompt-option' + (choices.includes(option.value) ? ' selected' : '')} key=${option.value}>
           <input type=${prompt.multiple ? 'checkbox' : 'radio'} name=${'prompt-' + prompt.id} value=${option.value}
             checked=${choices.includes(option.value)} onChange=${event => choose(option, event.currentTarget.checked)}

@@ -115,6 +115,8 @@ def messages(record):
         if role not in ("user", "assistant") or record.get("isMeta") or record.get("isCompactSummary") or record.get("isApiErrorMessage"):
             return []
         blocks = message.get("content", [])
+        if role == "user" and re.match(r"^\s*<command-name>/(?:clear|new|reset)</command-name>\s*<command-message>", content_text(blocks)):
+            return []
         if isinstance(blocks, str):
             emit(role, blocks)
         elif isinstance(blocks, list):

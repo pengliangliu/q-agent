@@ -1,6 +1,9 @@
 .completion-notifications { position: relative; }
 .completion-toggle { position: relative; }
 .completion-count { position: absolute; top: -4px; right: -5px; min-width: 15px; height: 15px; box-sizing: border-box; padding: 0 4px; border-radius: 8px; background: var(--desktop-primary, var(--text-hi)); color: var(--desktop-primary-text, var(--bg)); font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; }
+.session-completion-bubble { flex: 0 0 auto; white-space: nowrap; padding: 2px 6px; border-radius: 10px; background: #16704a; color: #fff; font: 600 10px/14px var(--sans, system-ui); animation: session-completion-enter 180ms ease-out; }
+@keyframes session-completion-enter { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .session-completion-bubble { animation: none; } }
 .completion-popover { position: absolute; z-index: 100; top: calc(100% + 10px); right: 0; width: min(350px, calc(100vw - 28px)); box-sizing: border-box; padding: 15px; border: 1px solid var(--border-hi, var(--border)); border-radius: 12px; background: var(--bg); color: var(--text-hi); box-shadow: 0 12px 36px #0004; font-family: var(--sans, system-ui); }
 .completion-popover header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .completion-popover header strong { font-size: 14px; font-weight: 600; }

@@ -11,7 +11,7 @@ process.env.HOME = directory;
 process.env.USERPROFILE = directory;
 assert.equal(path.resolve(os.homedir()), path.resolve(directory));
 const { handleChat } = await import('../desktop-files/chat-backend.mjs');
-const { claudeQuestionResult } = await import('../desktop-files/prompt-adapter.mjs');
+const { claudeQuestionResult, claudeSurveyPrompt } = await import('../desktop-files/prompt-adapter.mjs');
 const question = (header = '合成问题', text = '请选择一个合成选项。') => ({ header, question: text, multiSelect: false,
   options: [{ label: '选项甲', description: '合成说明甲' }, { label: '选项乙', description: '合成说明乙' }] });
 const record = block => JSON.stringify({ type: block.type === 'tool_result' ? 'user' : 'assistant',
@@ -127,6 +127,52 @@ async function run(mode) {
   tested.push(mode);
 }
 
+async function survey() {
+  const menu = '❯ ● How is Claude doing this session? (optional)\n  1: Bad  2: Fine  3: Good  0: Dismiss\n';
+  const bordered = '────────────\n❯\n────────────\n';
+  assert.equal(claudeSurveyPrompt(bordered + menu.slice(2))?.type, 'survey');
+  assert.equal(claudeSurveyPrompt(menu.replace('❯ ●', '●') + bordered), null);
+  assert.equal(claudeSurveyPrompt(menu.replace('0: Dismiss', '0: Share transcript')), null);
+  assert.equal(claudeSurveyPrompt(menu + '❯ operator draft\n'), null);
+  const row = { id:'synthetic-survey', tool:'claude', status:'waiting', path:directory, tmux_session:'survey-pane',
+    claude_session_id:'synthetic-native-survey' };
+  let content = menu, turn = 1;
+  const keys = [];
+  const api = {
+    deck:'synthetic-deck', session:async () => row, bodyJSON:async req => req.body,
+    reply:(res, code, body) => Object.assign(res,{code,body}),
+    exec:async (bin, args) => {
+      if (bin === '/usr/bin/python3') return { stdout:JSON.stringify({ messages:[{ role:'assistant', id:'turn-' + turn }] }) };
+      if (args[1] === 'output') return { stdout:JSON.stringify({ success:true, session_id:row.id, content }) };
+      assert.deepEqual(args, ['session','send-keys',row.id,'--named-key',turn === 1 ? '0' : '3','--primary','--json']);
+      keys.push(args[4]);
+      content = bordered;
+      return { stdout:JSON.stringify({ success:true, session_id:row.id }) };
+    },
+  };
+  async function invoke(route, body) {
+    const res = {};
+    await handleChat({ method:body ? 'POST' : 'GET', body, headers:{ 'x-agentdeck-desktop':'1' } }, res,
+      new URL('http://fixture/desktop/chat/' + route), api);
+    return res;
+  }
+  const initial = await invoke('history?sessionId=' + row.id);
+  assert.equal(initial.body.prompt.type, 'survey');
+  assert.equal(initial.body.activity, 'awaiting_input');
+  const skip = { sessionId:row.id, promptId:initial.body.prompt.id, action:'cancel' };
+  assert.equal((await invoke('respond', { ...skip, choice:'3' })).code, 409);
+  assert.deepEqual(keys, []);
+  assert.equal((await invoke('respond', skip)).body.verified, true);
+  assert.equal((await invoke('respond', skip)).code, 409);
+  content = menu;
+  turn++;
+  row.tmux_session = 'survey-pane-next';
+  const next = await invoke('history?sessionId=' + row.id);
+  assert.notEqual(next.body.prompt.id, skip.promptId);
+  assert.equal((await invoke('respond', { ...skip, promptId:next.body.prompt.id, action:'submit', choice:'3' })).body.verified, true);
+  assert.deepEqual(keys, ['0', '3']);
+}
+
 try {
   for (const mode of ['accepted', 'rejected', 'cancelled', 'missing-null', 'missing-same', 'next-step',
     'different-call', 'navigation-only', 'final-key-refused']) await run(mode);
@@ -136,6 +182,7 @@ try {
       { type: 'tool_result', tool_use_id: 'exact-call', content: 'Synthetic sidechain output' },
     ] } }) + '\n');
   assert.equal(await claudeQuestionResult(scopeFile, 'exact-call'), null);
+  await survey();
   console.log('PASS: ' + tested.join(', ') + '; exact call scope; no answer text in receipts; no key replay.');
 } finally {
   if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;

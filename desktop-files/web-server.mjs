@@ -20,6 +20,7 @@ import { handleCompletion } from './completion-status.mjs';
 import { handleQuota } from './chat-quota.mjs';
 import { handleDiagnostics, interfaceVersion } from './desktop-diagnostics.mjs';
 import { handleOutputFiles } from './output-files.mjs';
+import { startClaudeConversationSync } from './claude-conversations.mjs';
 
 const exec = promisify(execFile);
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -262,3 +263,4 @@ server.on('upgrade', (req, socket, head) => {
   upgrade.end();
 });
 server.listen(port, '127.0.0.1', () => console.log(`Q-agent：http://127.0.0.1:${port}`));
+startClaudeConversationSync({ deck, exec, session });

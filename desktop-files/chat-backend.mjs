@@ -3,13 +3,14 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { codexApprovalPrompt as approvalPrompt, claudePrompt, pendingClaudeRequest, pendingCodexRequest, publicPrompt,
+import { codexApprovalPrompt as approvalPrompt, claudePrompt, claudeSurveyPrompt, pendingClaudeRequest, pendingCodexRequest, publicPrompt,
   validateClaudeAnswer, answerClaudePrompt, claudeQuestionResult } from './prompt-adapter.mjs';
 import { acquireNativeControl, sendVerifiedMenuKey, hasPendingSend, nativeComposer } from './native-controls.mjs';
 import { deliverNow, deliverNowInfo, deliverNewMessageNow } from './deliver-now.mjs';
 import { codexQueuedInput as nativeQueuedInput, deliveryIdentity } from './deliver-now-control.mjs';
 import { nativeSuggestion } from './native-suggestions.mjs';
 import { codexContextSuggestion } from './codex-suggestions.mjs';
+import { resumeClaudeOnOpen, resumeSavedClaude } from './claude-conversations.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const receipts = path.join(os.homedir(), '.local/share/agent-deck/chat-receipts');
@@ -48,6 +49,12 @@ async function cachedSession(id, api, fresh = false) {
   if (!fresh && cached && Date.now() - cached.time < 2500) return cached.value;
   const entry = { time: Date.now() };
   entry.promise = api.session(id).then(value => {
+    const previous = cached?.value;
+    if (value.tool === 'claude' && previous?.tool === 'claude' &&
+        value.path === previous.path && value.account === previous.account && value.profile === previous.profile &&
+        !value.transcript_path) {
+      value = { ...value, claudeProjectTranscript: previous.transcript_path || previous.claudeProjectTranscript };
+    }
     entry.value = value; entry.time = Date.now(); delete entry.promise; return value;
   }).catch(error => { sessions.delete(id); throw error; });
   sessions.set(id, entry);
@@ -184,6 +191,28 @@ async function history(row, before, api) {
   return entry.promise;
 }
 
+const claudeTranscript = /^([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\.jsonl(?:\.zst)?$/i;
+
+async function claudeConversations(row) {
+  const source = row.transcript_path || row.claudeProjectTranscript || '';
+  const folder = path.dirname(source);
+  if (!path.isAbsolute(source) || !claudeTranscript.test(path.basename(source)) ||
+      path.basename(path.dirname(folder)) !== 'projects') return [];
+  const entries = await fsp.readdir(folder, { withFileTypes: true }).catch(error => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  const conversations = new Map();
+  for (const entry of entries) {
+    const id = claudeTranscript.exec(entry.name)?.[1];
+    if (!id || !entry.isFile() || (conversations.has(id) && entry.name.endsWith('.zst'))) continue;
+    const file = path.join(folder, entry.name);
+    const stat = await fsp.lstat(file).catch(() => null);
+    if (stat?.isFile() && stat.size > 0) conversations.set(id, { id, file, modifiedAt: stat.mtimeMs });
+  }
+  return [...conversations.values()].sort((a, b) => b.modifiedAt - a.modifiedAt);
+}
+
 async function currentPrompt(row, api, fresh = false, turnId = '') {
   if (!['claude', 'codex'].includes(row.tool) || ['stopped', 'error', 'starting'].includes(row.status)) return null;
   if (row.tool === 'codex' && !['waiting', 'idle'].includes(chatActivity(row).activity) && !/approval|permission|menu|question/.test(row.substate || '')) return null;
@@ -193,12 +222,17 @@ async function currentPrompt(row, api, fresh = false, turnId = '') {
   const pane = await cli(api, row, ['session', 'output', row.id, '--pane', '--primary', '--json']);
   if (pane.session_id && pane.session_id !== row.id) throw new Error('终端会话标识不一致。');
   const pending = row.tool === 'claude' ? await pendingClaudeRequest(row.transcript_path, pane.content).catch(() => null) : null;
-  let value = pane.success ? (row.tool === 'claude' ? claudePrompt(pane.content, pending) : approvalPrompt(pane.content)) : null;
+  let value = pane.success ? (row.tool === 'claude'
+    ? claudePrompt(pane.content, pending) || claudeSurveyPrompt(pane.content)
+    : approvalPrompt(pane.content)) : null;
   if (value && row.tool === 'codex') {
     const request = await pendingCodexRequest(row.transcript_path).catch(() => null);
     value = request ? { ...value, id: hash(JSON.stringify([row.id, row.codex_session_id, request, value.id])) }
       : { type: 'terminal', kind: 'terminal', supported: false, state: 'unsupported', options: [],
         text: '当前权限请求缺少可核验的原生调用标识，请在高级终端核对。' };
+  } else if (value?.type === 'survey') {
+    const latest = turnId || (await history(row, null, api)).messages?.findLast(message => ['user', 'assistant'].includes(message.role))?.id || '';
+    value.id = hash(JSON.stringify([row.id, row.tmux_session, row.claude_session_id, latest, value.id]));
   } else if (value) {
     value.id = hash(JSON.stringify([row.id, row.claude_session_id, value.id]));
   }
@@ -265,7 +299,7 @@ async function respondToPrompt(row, body, api) {
           record.keySent = null;
           if (nativeQuestion && final) record.finalKeyAttempted = true;
           await saveReceipt(marker, record);
-          const output = args[0] === '--named-key' ? await sendVerifiedMenuKey(row, args[1], api)
+          const output = args[0] === '--named-key' && prompt.type !== 'survey' ? await sendVerifiedMenuKey(row, args[1], api)
             : await cli(api, row, ['session', 'send-keys', row.id, ...args, '--primary', '--json']);
           if (output.success !== true || (output.session_id && output.session_id !== row.id)) throw new Error('未能确认按键已送达原会话。');
           record.keySent = true;
@@ -532,6 +566,32 @@ export async function handleChat(req, res, url, api) {
     return respond(403, { error: '请从本地聊天界面操作。' });
   }
   try {
+    if (req.method === 'POST' && url.pathname === '/desktop/chat/resume-conversation') {
+      const body = await api.bodyJSON(req);
+      const row = await cachedSession(body.sessionId, api, true);
+      supported(row);
+      if (row.tool !== 'claude') return respond(400, { error: '此入口用于 Claude 终端对话。' });
+      const selected = (await claudeConversations(row)).find(item => item.id === body.nativeId);
+      if (!selected) return respond(404, { error: '当前项目中找不到这段 Claude 对话。' });
+      return respond(200, { sessionId: await resumeSavedClaude(api, row, selected) });
+    }
+    if (req.method === 'GET' && url.pathname === '/desktop/chat/conversations') {
+      const row = await cachedSession(url.searchParams.get('sessionId'), api);
+      supported(row);
+      if (row.tool !== 'claude') return respond(400, { error: '此入口用于 Claude 终端对话。' });
+      const conversations = await claudeConversations(row);
+      const nativeId = url.searchParams.get('nativeId');
+      if (!nativeId) return respond(200, {
+        currentId: row.claude_session_id || '',
+        conversations: conversations.map(({ id, modifiedAt }) => ({ id, modifiedAt })),
+      });
+      const selected = conversations.find(item => item.id === nativeId);
+      if (!selected) return respond(404, { error: '当前项目中找不到这段 Claude 对话。' });
+      const before = url.searchParams.get('before');
+      if (before && before.length > 500) throw new Error('分页参数无效。');
+      const data = await history({ ...row, id: row.id + ':' + nativeId, transcript_path: selected.file }, before, api);
+      return respond(200, { messages: data.messages, hasMore: data.hasMore, before: data.before, notice: data.notice });
+    }
     if (req.method === 'GET' && url.pathname === '/desktop/chat/history') {
       const row = await cachedSession(url.searchParams.get('sessionId'), api);
       supported(row);
@@ -556,12 +616,13 @@ export async function handleChat(req, res, url, api) {
       }
       const foregroundIdle = ['waiting', 'idle'].includes(activity.activity);
       const canSuggest = foregroundIdle && !requestIssue && !before && !prompt && captured?.identity === hash(JSON.stringify(deliveryIdentity(row))) && captured.turnId === turnId && Date.now() - captured.time < 3000;
-      const suggestionRow = foregroundIdle ? { ...row, status: 'waiting' } : row;
-      const suggestion = canSuggest ? nativeSuggestion(suggestionRow, captured.content, conversationId, turnId) ||
+      const suggestionRow = canSuggest && !await hasPendingSend(row) ? { ...row, status: 'waiting', queue: [] } : null;
+      const suggestion = suggestionRow ? nativeSuggestion(suggestionRow, captured.content, conversationId, turnId) ||
         await codexContextSuggestion(suggestionRow, captured.content, conversationId, data.messages).catch(() => null) : null;
       return respond(200, { ...data, account:row.account || '', status: row.status, substate: row.substate || '', prompt: publicPrompt(prompt), suggestion,
         conversationId, ...activity, responseStatus: await responseStatus(row, prompt),
         startupError: startupFailure(row),
+        resumeOnOpen: resumeClaudeOnOpen(row) || false,
         canSend: !['stopped', 'error', 'starting'].includes(row.status),
         canInterrupt: activity.turnRunning });
     }

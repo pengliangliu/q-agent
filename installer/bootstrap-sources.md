@@ -2,14 +2,14 @@
 
 The setup wizard downloads dependencies from the publishers; none of these binaries,
 login credentials, API keys, or conversation data are bundled in Q-agent.
-Existing Claude/Codex installations are reused. Existing Agent Deck must match the
-bridge's supported version; existing Node must be version 22 or newer.
+Existing Claude/Codex installations are reused. The wizard reuses Agent Deck
+v1.16.35 and v1.16.38. Existing Node must be version 22 or newer.
 
-Pinned releases checked on 2026-11-01:
+Pinned releases for new installations:
 
 | Component | Release | Integrity source |
 | --- | --- | --- |
-| Agent Deck | 1.16.35, Linux amd64 | [Official release checksums](https://github.com/asheshgoplani/agent-deck/releases/download/v1.16.35/checksums.txt); SHA256 `369990183649b5016d9d542efb5179a3405fa26ff24ed31aed6a4edcb2f6cdb9` |
+| Agent Deck | 1.16.38, Linux amd64 | [Official release checksums](https://github.com/asheshgoplani/agent-deck/releases/download/v1.16.38/checksums.txt) · SHA256 `f7971f893cfc0e255fb6bdd281bef2119915e832d6970f386284127b00b63536` |
 | Node.js | 22.23.4 LTS, Linux x64 | [Official SHA256 list](https://nodejs.org/dist/v22.23.4/SHASUMS256.txt); SHA256 `1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce` |
 | Claude Code | 2.1.316, Linux x64 | [Official signed manifest](https://downloads.claude.ai/claude-code-releases/2.1.316/manifest.json); SHA256 `fd13c70000fec3f2116dfbcbb6121210b4a29328bf0e46210a59dd594a67d824` |
 | Codex CLI | 0.163.0 | [Official npm package metadata](https://registry.npmjs.org/@openai/codex/0.163.0); npm verifies package integrity, optional platform dependency included |
